@@ -160,6 +160,7 @@
     const MAX_DAYS = 14;
     let hasAnomalyToday = false, currentAnomalyId = null; 
     let isTransitioning = false, currentLookTarget = null, lastValidTarget = null; 
+    let lastLookTargetAt = 0; 
 
     const gameObjects = { stage1: {}, stage2: {} };
     // 鞋子不再是异常，它是身体部位！
@@ -1011,6 +1012,7 @@
         if (foundTarget) { 
             currentLookTarget = foundTarget; 
             lastValidTarget = foundTarget; 
+            lastLookTargetAt = performance.now(); 
             showReportButton(); 
         } else { 
             currentLookTarget = null; 
