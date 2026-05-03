@@ -150,10 +150,6 @@
         <p id="transition-desc" class="text-red-500 text-base md:text-xl font-bold tracking-widest max-w-sm leading-relaxed whitespace-pre-wrap"></p>
     </div>
 
-    <div id="error-toast" class="hidden absolute top-24 left-1/2 -translate-x-1/2 z-[10000] max-w-md w-[92%] bg-red-950/90 border border-red-400 text-red-100 rounded-xl px-4 py-3 shadow-[0_0_20px_rgba(255,0,0,0.5)] backdrop-blur-md">
-        <p class="text-xs font-mono tracking-wide">系统报错</p>
-        <p id="error-toast-msg" class="text-sm mt-1 leading-relaxed break-words"></p>
-    </div>
 
 </div>
 
@@ -731,18 +727,6 @@
         }
     }
 
-    function showRuntimeError(msg) {
-        const toast = document.getElementById('error-toast');
-        const text = document.getElementById('error-toast-msg');
-        if (toast && text) {
-            text.innerText = msg;
-            toast.classList.remove('hidden');
-            setTimeout(() => toast.classList.add('hidden'), 3200);
-        }
-        // 直接弹框，确保玩家一定能看到错误
-        window.alert(msg);
-    }
-
     // 核心安全转场：绝对无死锁
     function triggerTransition(title, subtitle, isGameOver = false) {
         if (isTransitioning) return;
@@ -763,7 +747,7 @@
             } catch (err) {
                 const reason = err && err.message ? err.message : '未知异常';
                 console.error('transition failed:', err);
-                showRuntimeError(`换天失败：${reason}（已自动恢复）`);
+                window.alert(`换天失败：${reason}（已自动恢复）`);
             } finally {
                 screen.style.opacity = '0';
                 setTimeout(() => {
