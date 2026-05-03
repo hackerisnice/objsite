@@ -3,311 +3,1054 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>校园怪谈：最终修复版</title>
+    <title>校园怪谈：零Bug高跟真理版</title>
+    <!-- 核心 Three.js (企业级稳定 CDN) -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: 'PingFang SC', sans-serif; background: #000; touch-action: none; user-select: none; }
+        body { margin: 0; overflow: hidden; font-family: 'PingFang SC', sans-serif; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; }
         #ui-layer { pointer-events: none; z-index: 10; }
-        .interactive { pointer-events: auto; }
+        .interactive { pointer-events: auto; touch-action: manipulation; }
+
+        #cinematic-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.95) 100%);
+            pointer-events: none; z-index: 5; mix-blend-mode: multiply;
+        }
+        #film-grain {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url('data:image/svg+xml;utf8,%3Csvg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noiseFilter"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%25" height="100%25" filter="url(%23noiseFilter)" opacity="0.08"/%3E%3C/svg%3E');
+            pointer-events: none; z-index: 6; opacity: 0.6; mix-blend-mode: overlay;
+        }
+
         #crosshair {
             position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
             background: rgba(255, 255, 255, 0.9); border-radius: 50%; transform: translate(-50%, -50%);
-            z-index: 20; transition: all 0.2s;
+            box-shadow: 0 0 5px rgba(0,0,0,1); transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 20;
         }
-        .crosshair-active { width: 20px !important; height: 20px !important; background: rgba(255, 30, 30, 0.8) !important; border: 2px solid #fff; }
-        #joystick-base { position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; z-index: 50; }
-        #joystick-stick { position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; background: #fff; border-radius: 50%; transform: translate(-50%, -50%); }
-        .action-btn { position: absolute; right: 40px; width: 70px; height: 70px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; z-index: 50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
-        .btn-active { background: rgba(255, 50, 50, 0.5) !important; }
+        .crosshair-active { 
+            width: 18px !important; height: 18px !important; background: rgba(255, 30, 30, 0.8) !important; 
+            border: 2px solid #fff; box-shadow: 0 0 20px rgba(255,0,0,0.8);
+        }
+
+        #joystick-base {
+            position: absolute; bottom: 40px; left: 40px; width: 130px; height: 130px;
+            background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%; z-index: 50; pointer-events: auto; backdrop-filter: blur(8px);
+        }
+        #joystick-stick {
+            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(200,200,200,0.5)); 
+            border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        .action-btn {
+            position: absolute; right: 40px; width: 75px; height: 75px;
+            background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%; z-index: 50; pointer-events: auto; backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center; flex-direction: column;
+            color: white; font-weight: bold; font-size: 14px; box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+            transition: all 0.1s;
+        }
+        .action-btn:active { transform: scale(0.9); background: rgba(255, 255, 255, 0.3); }
+        .btn-active-state { background: rgba(255, 50, 50, 0.4) !important; border-color: rgba(255, 100, 100, 0.8) !important; }
+        
         #jump-btn { bottom: 40px; }
         #sprint-btn { bottom: 130px; }
+
+        #transition-screen { background: black; transition: opacity 0.5s ease-in-out; z-index: 9999; }
+        .pointer-none { pointer-events: none; }
     </style>
 </head>
 <body>
 
-<div id="crosshair"></div>
+<div id="cinematic-overlay"></div>
+<div id="film-grain"></div>
+
 <div id="ui-layer" class="fixed inset-0 flex flex-col justify-between">
-    <div class="p-6 flex justify-between items-start text-white">
-        <div class="bg-black/60 p-4 rounded-xl border border-gray-700 backdrop-blur-md">
-            <h1 class="text-3xl font-black text-red-500 tracking-widest" id="day-display">第 1 天</h1>
-            <p class="text-xs text-gray-300 mt-1 font-mono" id="stage-desc">LOC: CLASSROOM</p>
+    <!-- 顶部 HUD -->
+    <div class="p-4 md:p-6 flex justify-between items-start text-white">
+        <div class="bg-black/60 p-3 md:p-4 rounded-xl border border-gray-700 backdrop-blur-md shadow-2xl">
+            <h1 class="text-xl md:text-3xl font-black text-red-500 tracking-widest drop-shadow-[0_0_10px_rgba(255,0,0,0.5)]" id="day-display">第 1 天</h1>
+            <p class="text-[10px] md:text-xs text-gray-300 mt-1 font-mono tracking-wider" id="stage-desc">LOC: CLASSROOM</p>
         </div>
-        <div id="reset-btn" class="bg-black/50 px-4 py-2 rounded-lg border border-gray-700 interactive cursor-pointer">
-            <p class="text-xs font-bold text-gray-400">↻ 重置视角</p>
+        
+        <div class="flex flex-col items-end gap-2">
+            <!-- 装备加载监控 -->
+            <div class="bg-black/70 px-3 py-2.5 rounded-xl border border-gray-600 backdrop-blur-md shadow-xl flex flex-col gap-1.5 w-[140px] md:w-[170px]">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]">👠</span>
+                    <div class="text-left flex-1">
+                        <p class="text-[11px] font-bold text-gray-300 tracking-wider">自身装备挂载</p>
+                        <p class="text-[10px] md:text-xs font-mono mt-0.5 font-bold" id="obj-status">
+                            <span class="text-yellow-400 animate-pulse">请求连接...</span>
+                        </p>
+                    </div>
+                </div>
+                <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-0.5 border border-black flex">
+                    <div id="loading-bar-earring" class="bg-blue-400 h-full w-0 transition-all duration-200"></div>
+                    <div id="loading-bar-shoe" class="bg-purple-400 h-full w-0 transition-all duration-200"></div>
+                </div>
+            </div>
+            
+            <div id="reset-btn" class="bg-black/50 px-3 py-1.5 rounded-lg border border-gray-700 text-right interactive backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-colors">
+                <p class="text-[10px] md:text-xs font-bold text-gray-400 pointer-none">↻ 重置物理视角</p>
+            </div>
         </div>
     </div>
 
-    <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 interactive">
-        <button id="report-btn" class="hidden px-8 py-3 bg-red-700 text-white font-bold rounded-xl border border-red-400 shadow-[0_0_20px_rgba(255,0,0,0.5)]">
-            ⚠️ 报告异常: <span id="target-name">未知</span>
+    <!-- 报告异常 -->
+    <div class="absolute top-[55%] left-1/2 transform -translate-x-1/2 -translate-y-1/2 interactive flex flex-col items-center">
+        <button id="report-btn" class="hidden px-8 py-3 bg-red-700/95 text-white font-bold rounded-xl border border-red-400 active:scale-95 flex items-center gap-3 backdrop-blur-md shadow-[0_0_30px_rgba(255,0,0,0.6)] transition-transform">
+            <span class="text-3xl pointer-none">⚠️</span> 
+            <div class="flex flex-col items-start pointer-none">
+                <span class="text-xl tracking-widest leading-none">报告异常</span>
+                <span id="target-name" class="text-[11px] text-yellow-300 mt-1 font-mono tracking-wide">目标: 未知</span>
+            </div>
         </button>
     </div>
 
-    <div id="joystick-base" class="hidden interactive"><div id="joystick-stick"></div></div>
-    <div id="jump-btn" class="action-btn hidden interactive">跳跃</div>
-    <div id="sprint-btn" class="action-btn hidden interactive">步行</div>
+    <div id="joystick-base" class="hidden"><div id="joystick-stick"></div></div>
+    <div id="jump-btn" class="action-btn hidden select-none"><span class="text-xl pointer-none">⏫</span><span class="pointer-none">跳跃</span></div>
+    <div id="sprint-btn" class="action-btn hidden select-none"><span class="text-xl pointer-none">🏃</span><span id="sprint-txt" class="pointer-none">步行</span></div>
 
-    <div class="mb-10 w-full flex justify-center interactive">
-        <button id="normal-btn" class="px-12 py-4 bg-gray-900 border border-gray-500 text-white font-bold rounded-full text-lg shadow-2xl">
-            🚪 一切正常 (进入下一天)
+    <!-- 一切正常 -->
+    <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 interactive z-40 w-full max-w-sm flex justify-center">
+        <button id="normal-btn" class="px-10 py-4 bg-gray-900/90 border border-gray-500 text-white font-bold rounded-full text-lg hover:bg-gray-800 active:scale-95 backdrop-blur-lg shadow-[0_0_20px_rgba(0,0,0,0.8)] tracking-widest transition-transform">
+            <span class="pointer-none">🚪 一切正常 (离开区域)</span>
         </button>
     </div>
 
-    <div id="start-screen" class="absolute inset-0 bg-black flex flex-col items-center justify-center p-6 text-center interactive z-50">
-        <h2 class="text-6xl font-black mb-4 text-red-600">校园怪谈</h2>
-        <p class="text-gray-400 mb-8 max-w-md">寻找环境中的异常。如果没有异常，直接推门。如果发现异常，准星对准它并点击报告。</p>
-        <button id="start-btn" class="px-14 py-4 bg-red-800 text-white font-black rounded-full text-xl shadow-lg">进入校园</button>
+    <!-- 开始界面 -->
+    <div id="start-screen" class="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-6 text-center interactive z-50 backdrop-blur-xl">
+        <h2 class="text-5xl md:text-7xl font-black mb-4 text-red-600 tracking-tighter drop-shadow-[0_0_20px_rgba(255,0,0,0.4)]">校园怪谈</h2>
+        <h3 class="text-xl font-bold mb-8 text-gray-300 tracking-widest border-b border-gray-700 pb-4">零Bug 真理终局版</h3>
+        <div class="max-w-md mb-10 text-left bg-gray-900/50 p-6 rounded-2xl border border-gray-800 shadow-2xl">
+            <ul class="list-disc pl-5 space-y-3 text-sm text-gray-300">
+                <li><span class="text-red-500 font-bold">彻底修复逻辑死锁：</span>移除了按键冲撞判定，无论报对报错，100%秒进转场！</li>
+                <li><span class="text-purple-400 font-bold">完美高跟鞋穿模修复：</span>鞋子间距已拉开，方向已修正。低头可见随步伐交替的鞋尖，并伴随清脆音效。</li>
+                <li>注意寻找环境里的异常，点击【推门进入】以激活音效引擎。</li>
+            </ul>
+        </div>
+        <button id="start-btn" class="px-14 py-4 bg-red-800 text-white font-black rounded-full text-xl active:scale-95 shadow-[0_0_30px_rgba(255,0,0,0.5)] border border-red-500 transition-all hover:bg-red-700">
+            推门进入 (激活音效)
+        </button>
     </div>
 
-    <div id="transition-screen" class="hidden absolute inset-0 bg-black flex flex-col items-center justify-center text-center z-[100]">
-        <h2 id="transition-title" class="text-5xl font-black text-white mb-4"></h2>
-        <p id="transition-desc" class="text-red-500 text-xl font-bold"></p>
+    <div id="win-screen" class="hidden absolute inset-0 bg-white flex flex-col items-center justify-center p-8 text-center interactive z-50">
+        <h2 class="text-6xl font-black mb-6 text-black tracking-tighter">逃出生天</h2>
+        <p class="text-xl text-gray-700 font-bold mb-10">极致的观察力，完美打破了循环。</p>
+        <button onclick="location.reload()" class="px-12 py-4 bg-black text-white font-bold rounded-full text-xl shadow-2xl hover:scale-105 transition-transform">重返现实</button>
     </div>
+
+    <div id="transition-screen" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center">
+        <h2 id="transition-title" class="text-4xl md:text-6xl font-black text-white mb-4 drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]"></h2>
+        <p id="transition-desc" class="text-red-500 text-base md:text-xl font-bold tracking-widest max-w-sm leading-relaxed whitespace-pre-wrap"></p>
+    </div>
+
 </div>
 
 <script>
-    // --- 核心变量 ---
     let scene, camera, renderer, raycaster;
+    
+    // --- 核心状态 ---
     let currentDay = 1, currentStage = 1; 
-    let hasAnomalyToday = false, currentAnomalyId = null;
-    let isTransitioning = false, currentLookTarget = null;
-    
-    // 运动状态
-    const moveState = { forward: 0, right: 0 };
-    let isSprinting = false, yVelocity = 0, isGrounded = true;
-    const WALK_SPEED = 0.06, SPRINT_SPEED = 0.13, GRAVITY = 0.01, JUMP_FORCE = 0.18;
-    
+    const MAX_DAYS = 14;
+    let hasAnomalyToday = false, currentAnomalyId = null; 
+    let isTransitioning = false, currentLookTarget = null, lastValidTarget = null; 
+
     const gameObjects = { stage1: {}, stage2: {} };
+    // 鞋子不再是异常，它是身体部位！
+    const interactableIds_1 = ['blackboard', 'clock', 'student', 'poster', 'door_stage1', 'computer'];
+    const interactableIds_2 = ['exit_sign', 'extinguisher', 'locker', 'vending_machine', 'hall_door'];
+    
     const nameMap = {
-        'blackboard': '黑板', 'clock': '时钟', 'student': '同学', 'poster': '海报', 
-        'computer': '电脑', 'exit_sign': '安全出口', 'extinguisher': '灭火器', 'locker': '储物柜'
+        'blackboard': '黑板题目', 'clock': '墙上时钟', 'student': '方块同学', 'poster': '墙上海报', 'door_stage1': '教室木门', 'computer': '讲台电脑',
+        'exit_sign': '安全出口标志', 'extinguisher': '灭火器', 'locker': '铁皮储物柜', 'vending_machine': '自动贩卖机', 'hall_door': '走廊大门'
     };
 
-    // --- 初始化 ---
+    const STAGE_1_CENTER = new THREE.Vector3(0, 0, 0);
+    const STAGE_2_CENTER = new THREE.Vector3(100, 0, 0);
+    
+    // --- 运动与步伐物理 ---
+    const moveState = { forward: 0, right: 0 }; 
+    const WALK_SPEED = 0.05, SPRINT_SPEED = 0.14;
+    let isSprinting = false, currentSpeed = WALK_SPEED;
+    
+    // 步伐追踪器 (音效与身体部位摆动)
+    let stepAccumulator = 0;
+    let lastStepIndex = 0;
+
+    const CAMERA_HEIGHT = 1.6;
+    let yVelocity = 0, isGrounded = true;
+    const GRAVITY = 0.012, JUMP_FORCE = 0.20;
+
+    let targetRotationX = 0, targetRotationY = 0;
+    let isLooking = false, prevLookX = 0, prevLookY = 0;
+    const MAX_PITCH = Math.PI / 2.2; 
+    
+    let prevCamRotY = 0, prevCamRotX = 0;
+    let camAngularVelY = 0, camAngularVelX = 0;
+    
+    const earringsSystem = []; 
+    // 第一人称鞋子
+    let leftShoeMesh = new THREE.Group();
+    let rightShoeMesh = new THREE.Group();
+
+    const globalTextures = {};
+    const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+
+    // --- 音效引擎 (高跟鞋脚步声) ---
+    let audioCtx = null;
+    function initAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playHeelStep(volume = 1.0) {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(900, t);
+        osc.frequency.exponentialRampToValueAtTime(100, t + 0.04);
+        filter.type = 'highpass'; filter.frequency.value = 1000;
+        gain.gain.setValueAtTime(volume * 0.8, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
+
+        osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(t); osc.stop(t + 0.06);
+    }
+
+    // --- 装备状态监控 ---
+    let objProgress = { earring: 0, shoe: 0, earringDone: false, shoeDone: false };
+    function updateObjUI() {
+        const el = document.getElementById('obj-status');
+        const bE = document.getElementById('loading-bar-earring');
+        const bS = document.getElementById('loading-bar-shoe');
+        
+        if (objProgress.earringDone && objProgress.shoeDone) {
+            el.innerHTML = '<span class="text-green-400">✅ 装备挂载完毕</span>';
+            bE.style.width = '50%'; bS.style.width = '50%';
+            bE.className = "bg-green-500 h-full transition-all duration-300";
+            bS.className = "bg-green-500 h-full transition-all duration-300";
+        } else {
+            let p1 = objProgress.earringDone ? 50 : (objProgress.earring / 100 * 50);
+            let p2 = objProgress.shoeDone ? 50 : (objProgress.shoe / 100 * 50);
+            el.innerHTML = `<span class="text-yellow-400 animate-pulse">⏳ 同步构建中...</span>`;
+            bE.style.width = `${p1}%`; bS.style.width = `${p2}%`;
+        }
+    }
+
     function init() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050505);
-        scene.fog = new THREE.FogExp2(0x050505, 0.05);
+        scene.background = new THREE.Color(0x020202);
+        scene.fog = new THREE.FogExp2(0x020202, 0.04); 
 
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-        camera.rotation.order = 'YXZ';
-
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 100);
+        camera.rotation.order = 'YXZ'; 
+        
+        renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); 
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
         renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+        document.body.appendChild(renderer.domElement);
         raycaster = new THREE.Raycaster();
 
-        // 基本灯光
-        const ambient = new THREE.AmbientLight(0xffffff, 0.2); scene.add(ambient);
-        const sun = new THREE.PointLight(0xffffff, 0.8, 50); sun.position.set(0, 8, 0); scene.add(sun);
+        scene.add(leftShoeMesh);
+        scene.add(rightShoeMesh);
 
-        buildClassroom();
+        generateSharedTextures();
+        buildStage1_Classroom();
+        buildStage2_Hallway();
+        addCinematicLights();
+
+        // 核心：并发加载两个装备 OBJ
+        loadCustomOBJs(); 
         setupControls();
-        
-        if ('ontouchstart' in window) {
-            document.getElementById('joystick-base').classList.remove('hidden');
-            document.getElementById('jump-btn').classList.remove('hidden');
-            document.getElementById('sprint-btn').classList.remove('hidden');
-        }
 
+        window.addEventListener('resize', onWindowResize, false);
+        
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            document.getElementById('joystick-base').classList.remove('hidden'); document.getElementById('joystick-base').classList.add('block');
+            document.getElementById('jump-btn').classList.remove('hidden'); document.getElementById('jump-btn').classList.add('flex');
+            document.getElementById('sprint-btn').classList.remove('hidden'); document.getElementById('sprint-btn').classList.add('flex');
+        }
         animate();
     }
 
-    // --- 场景构建 (简化示例版以便代码完整运行) ---
-    function buildClassroom() {
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({color: 0x222222}));
-        floor.rotation.x = -Math.PI/2; scene.add(floor);
+    // --- 📦 并发加载 真实提取几何体防偏移 ---
+    function loadCustomOBJs() {
+        if (typeof THREE.OBJLoader === 'undefined') {
+            document.getElementById('obj-status').innerHTML = '<span class="text-red-400">❌ 引擎库异常</span>';
+            return;
+        }
+        const objLoader = new THREE.OBJLoader();
 
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(20, 10, 20), new THREE.MeshStandardMaterial({color: 0x444444, side: THREE.BackSide}));
-        wall.position.y = 5; scene.add(wall);
+        // --- 1. Earring.obj ---
+        const earringUrl = 'https://hackerisnice.github.io/objsite/Earring.obj';
+        const earringMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1.0, roughness: 0.1, emissive: 0x667788, emissiveIntensity: 0.5 });
+        const fallbackGeo = new THREE.OctahedronGeometry(0.0035, 0); 
+        const linkGeo = new THREE.CylinderGeometry(0.0005, 0.0005, 0.02, 4);
+        const linkMat = new THREE.MeshStandardMaterial({color: 0xaaaaaa, metalness: 1.0, roughness: 0.4});
+        const anchors = [ new THREE.Vector3(-0.07, -0.04, -0.09), new THREE.Vector3( 0.07, -0.04, -0.09) ];
 
-        // 交互物体：黑板
-        const bb = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshStandardMaterial({color: 0x113311}));
-        bb.position.set(0, 3, -9.8); bb.userData.id = 'blackboard';
-        scene.add(bb); gameObjects.stage1.blackboard = bb;
+        for(let anchorLoc of anchors) {
+            const sys = { anchorLocal: anchorLoc, segments: 4, segLen: 0.03, nodes: [] };
+            for(let i=0; i<=sys.segments; i++) {
+                let mesh;
+                if(i === sys.segments) {
+                    mesh = new THREE.Group(); 
+                    const tempMesh = new THREE.Mesh(fallbackGeo, earringMat);
+                    tempMesh.scale.set(1, 1.5, 1); tempMesh.name = "fallback"; 
+                    mesh.add(tempMesh);
+                } else if(i > 0) { mesh = new THREE.Mesh(linkGeo, linkMat); } 
+                else { mesh = new THREE.Group(); }
+                scene.add(mesh);
+                sys.nodes.push({ pos: new THREE.Vector3(), oldPos: new THREE.Vector3(), mesh: mesh });
+            }
+            earringsSystem.push(sys);
+        }
+
+        objLoader.load(
+            earringUrl,
+            (object) => {
+                let extractedGeo = null;
+                object.traverse((child) => { 
+                    if (child.isMesh && !extractedGeo) { 
+                        extractedGeo = child.geometry.clone(); 
+                        if(!extractedGeo.attributes.normal) extractedGeo.computeVertexNormals(); 
+                    }
+                });
+                
+                if (extractedGeo) {
+                    extractedGeo.center(); 
+                    extractedGeo.computeBoundingBox();
+                    const box = extractedGeo.boundingBox;
+                    const maxDim = Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z);
+                    
+                    if (maxDim > 0 && isFinite(maxDim)) {
+                        const scale = 0.018 / maxDim; 
+                        extractedGeo.scale(scale, scale, scale);
+
+                        earringsSystem.forEach(sys => {
+                            const tailGroup = sys.nodes[sys.segments].mesh;
+                            const fallbackObj = tailGroup.getObjectByName("fallback");
+                            if(fallbackObj) tailGroup.remove(fallbackObj);
+                            
+                            const finalMesh = new THREE.Mesh(extractedGeo, earringMat);
+                            tailGroup.add(finalMesh); 
+                        });
+                        objProgress.earringDone = true; updateObjUI();
+                    }
+                }
+            },
+            (xhr) => { if (xhr.lengthComputable) { objProgress.earring = (xhr.loaded / xhr.total) * 100; updateObjUI(); } },
+            () => { objProgress.earringDone = true; updateObjUI(); } 
+        );
+
+        // --- 2. Shoe.obj (作为玩家第一人称身体) ---
+        const shoeUrl = 'https://hackerisnice.github.io/objsite/shoe.obj';
+        const shoeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1, metalness: 0.6, side: THREE.DoubleSide });
+
+        const fallbackShoeGeo = new THREE.BoxGeometry(0.12, 0.1, 0.25);
+        const tempShoeL = new THREE.Mesh(fallbackShoeGeo, shoeMat); tempShoeL.name = "fallback";
+        const tempShoeR = new THREE.Mesh(fallbackShoeGeo, shoeMat); tempShoeR.name = "fallback";
+        leftShoeMesh.add(tempShoeL);
+        rightShoeMesh.add(tempShoeR);
+
+        objLoader.load(
+            shoeUrl,
+            (object) => {
+                let extractedGeo = null;
+                object.traverse((child) => { 
+                    if (child.isMesh && !extractedGeo) { 
+                        extractedGeo = child.geometry.clone(); 
+                        if(!extractedGeo.attributes.normal) extractedGeo.computeVertexNormals(); 
+                    }
+                });
+
+                if (extractedGeo) {
+                    extractedGeo.center(); 
+                    // 修正朝向：多数模型是面向前方的，如果不准可修改此处 (Math.PI 即 180度翻转)
+                    extractedGeo.rotateY(Math.PI); 
+
+                    extractedGeo.computeBoundingBox();
+                    const box = extractedGeo.boundingBox;
+                    const maxDim = Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z);
+                    
+                    if (maxDim > 0 && isFinite(maxDim)) {
+                        const scale = 0.25 / maxDim; // 缩放至约 25cm 长
+                        extractedGeo.scale(scale, scale, scale);
+
+                        leftShoeMesh.remove(leftShoeMesh.getObjectByName("fallback"));
+                        rightShoeMesh.remove(rightShoeMesh.getObjectByName("fallback"));
+
+                        const finalMeshL = new THREE.Mesh(extractedGeo, shoeMat);
+                        const finalMeshR = new THREE.Mesh(extractedGeo, shoeMat);
+                        finalMeshR.scale.x = -1; // 镜像右脚
+
+                        // 给鞋子加上正确的基准高度 (高度的一半)
+                        const yOffset = ((box.max.y - box.min.y) * scale) / 2;
+                        finalMeshL.position.y = yOffset;
+                        finalMeshR.position.y = yOffset;
+
+                        leftShoeMesh.add(finalMeshL);
+                        rightShoeMesh.add(finalMeshR);
+                        
+                        objProgress.shoeDone = true; updateObjUI();
+                    }
+                }
+            },
+            (xhr) => { if (xhr.lengthComputable) { objProgress.shoe = (xhr.loaded / xhr.total) * 100; updateObjUI(); } },
+            () => { objProgress.shoeDone = true; updateObjUI(); }
+        );
     }
 
-    // --- 核心逻辑：切换天数 ---
+    // --- 动态耳坠物理 ---
+    function updateEarringsPhysics() {
+        camera.updateMatrixWorld(true);
+        let currRotY = camera.rotation.y, currRotX = camera.rotation.x;
+        camAngularVelY = currRotY - prevCamRotY; camAngularVelX = currRotX - prevCamRotX;
+        prevCamRotY = currRotY; prevCamRotX = currRotX;
+
+        let camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        let camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+
+        earringsSystem.forEach((sys) => {
+            for(let i=1; i<=sys.segments; i++) {
+                let n = sys.nodes[i];
+                let vel = n.pos.clone().sub(n.oldPos);
+                
+                let centrifugalForce = camRight.clone().multiplyScalar(camAngularVelY * i * 0.015);
+                let forwardForce = camForward.clone().multiplyScalar(camAngularVelX * i * 0.015);
+                
+                vel.add(centrifugalForce).add(forwardForce);
+                vel.multiplyScalar(0.92); 
+                n.oldPos.copy(n.pos); n.pos.add(vel); n.pos.y -= 0.001; 
+            }
+
+            let anchorWorld = sys.anchorLocal.clone().applyMatrix4(camera.matrixWorld);
+            sys.nodes[0].pos.copy(anchorWorld);
+
+            for(let step=0; step<4; step++) {
+                for(let i=0; i<sys.segments; i++) {
+                    let n1 = sys.nodes[i], n2 = sys.nodes[i+1];
+                    let delta = n2.pos.clone().sub(n1.pos);
+                    let dist = delta.length();
+                    if(dist > sys.segLen) {
+                        let diff = (dist - sys.segLen) / dist;
+                        let offset = delta.multiplyScalar(0.5 * diff);
+                        if(i > 0) n1.pos.add(offset);
+                        n2.pos.sub(offset);
+                    }
+                }
+            }
+
+            for(let i=1; i<=sys.segments; i++) {
+                sys.nodes[i].mesh.position.copy(sys.nodes[i].pos);
+                if(i < sys.segments) {
+                    let dir = sys.nodes[i+1].pos.clone().sub(sys.nodes[i].pos).normalize();
+                    let axis = new THREE.Vector3(0,1,0);
+                    sys.nodes[i].mesh.quaternion.setFromUnitVectors(axis, dir);
+                } else {
+                    sys.nodes[i].mesh.rotation.y += 0.03; sys.nodes[i].mesh.rotation.z += 0.02;
+                }
+            }
+        });
+    }
+
+    // --- 贴图生成 ---
+    function generateSharedTextures() {
+        const noiseCanvas = document.createElement('canvas'); noiseCanvas.width = 256; noiseCanvas.height = 256;
+        const nCtx = noiseCanvas.getContext('2d'); const nData = nCtx.createImageData(256, 256);
+        for(let i=0; i<nData.data.length; i+=4) { 
+            let v = 180 + Math.random()*75; nData.data[i]=v; nData.data[i+1]=v; nData.data[i+2]=v; nData.data[i+3]=255; 
+        }
+        nCtx.putImageData(nData, 0, 0);
+        globalTextures.noiseBump = new THREE.CanvasTexture(noiseCanvas);
+        globalTextures.noiseBump.wrapS = THREE.RepeatWrapping; globalTextures.noiseBump.wrapT = THREE.RepeatWrapping;
+        globalTextures.noiseBump.repeat.set(10, 10);
+
+        const woodCanvas = document.createElement('canvas'); woodCanvas.width = 512; woodCanvas.height = 512;
+        const wdCtx = woodCanvas.getContext('2d');
+        wdCtx.fillStyle = '#614029'; wdCtx.fillRect(0, 0, 512, 512); 
+        wdCtx.globalAlpha = 0.15;
+        for(let i=0; i<400; i++) {
+            wdCtx.fillStyle = Math.random() > 0.5 ? '#3a200d' : '#8f6040';
+            let w = 2 + Math.random() * 5; let h = 100 + Math.random() * 400;
+            wdCtx.fillRect(Math.random()*512, Math.random()*512, w, h);
+        }
+        for(let i=0; i<15; i++) {
+            wdCtx.beginPath(); wdCtx.ellipse(Math.random()*512, Math.random()*512, 4+Math.random()*6, 15+Math.random()*25, 0, 0, Math.PI*2);
+            wdCtx.fillStyle = '#3a200d'; wdCtx.fill();
+        }
+        wdCtx.globalAlpha = 1.0;
+        globalTextures.wood = new THREE.CanvasTexture(woodCanvas);
+        globalTextures.wood.encoding = THREE.sRGBEncoding;
+    }
+
+    function createChalkboardTexture(isAnomaly) {
+        const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const ctx = c.getContext('2d');
+        ctx.fillStyle = '#15241b'; ctx.fillRect(0,0,1024,512); ctx.globalAlpha = 0.03;
+        for(let i=0; i<400; i++) {
+            ctx.fillStyle = '#ffffff'; ctx.beginPath();
+            ctx.ellipse(Math.random()*1024, Math.random()*512, Math.random()*50+20, Math.random()*15+5, Math.random()*Math.PI, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = '#eeeeee'; ctx.font = 'bold 55px Arial'; ctx.fillText('物理压轴题:', 60, 100);
+        ctx.font = '45px Arial'; ctx.fillText('质量 m=2kg, 加速度 a=3m/s², 求合力 F。', 60, 180);
+        ctx.fillText('解：由牛顿第二定律 F = m * a', 60, 270); ctx.font = 'bold 85px Courier New'; 
+        if(isAnomaly) { ctx.fillStyle = '#ff6666'; ctx.fillText('F = 5 N', 60, 400); } 
+        else { ctx.fillStyle = '#ffffff'; ctx.fillText('F = 6 N', 60, 400); }
+        const tex = new THREE.CanvasTexture(c); tex.encoding = THREE.sRGBEncoding; return tex;
+    }
+
+    function createTextTexture(text, bgColor, textColor, size='40px') {
+        const c = document.createElement('canvas'); c.width = 512; c.height = 256; const ctx = c.getContext('2d');
+        ctx.fillStyle = bgColor; ctx.fillRect(0,0,512,256);
+        ctx.fillStyle = textColor; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font = `bold ${size} Arial`;
+        ctx.fillText(text, 256, 128);
+        const tex = new THREE.CanvasTexture(c); tex.encoding = THREE.sRGBEncoding; return tex;
+    }
+
+    // --- 场景构建 ---
+    function buildStage1_Classroom() {
+        const group = new THREE.Group(); group.position.copy(STAGE_1_CENTER);
+
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0, roughness: 0.9, bumpMap: globalTextures.noiseBump, bumpScale: 0.03 });
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.2, metalness: 0.3, bumpMap: globalTextures.noiseBump, bumpScale: 0.01 });
+
+        const roomGeo = new THREE.BoxGeometry(20, 10, 20);
+        const room = new THREE.Mesh(roomGeo, wallMat); room.material.side = THREE.BackSide; room.position.y = 5; room.receiveShadow=true; group.add(room);
+        const fl = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), floorMat); fl.rotation.x = -Math.PI/2; fl.position.y = 0.01; fl.receiveShadow=true; group.add(fl);
+
+        // Blackboard
+        const bbGroup = new THREE.Group();
+        const normTex = createChalkboardTexture(false); const anoTex = createChalkboardTexture(true);
+        const bb = new THREE.Mesh(new THREE.PlaneGeometry(9, 4), new THREE.MeshStandardMaterial({ map: normTex, roughness: 0.9, metalness: 0.0 }));
+        bb.position.z = 0.1; bbGroup.add(bb);
+        const frameMat = new THREE.MeshStandardMaterial({color: 0x2c2e33, metalness: 0.8, roughness: 0.3});
+        const frameB = new THREE.Mesh(new THREE.BoxGeometry(9.4, 4.4, 0.1), frameMat); bbGroup.add(frameB);
+        const tray = new THREE.Mesh(new THREE.BoxGeometry(9.4, 0.1, 0.3), frameMat); tray.position.set(0, -2.1, 0.15); bbGroup.add(tray);
+        
+        bbGroup.position.set(0, 4, -9.8); bbGroup.castShadow = true;
+        const bbHit = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 2), hitMat); bbHit.userData = { id: 'blackboard' }; bbGroup.add(bbHit); 
+        group.add(bbGroup); gameObjects.stage1.blackboard = { mesh: bb, norm: normTex, ano: anoTex }; 
+
+        // 3D Student
+        const stGroup = new THREE.Group();
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({color: 0xffccaa, roughness:0.5})); head.position.y = 1.3;
+        const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({color:0x000})); eyeL.position.set(-0.1, 0, 0.26); head.add(eyeL);
+        const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({color:0x000})); eyeR.position.set(0.1, 0, 0.26); head.add(eyeR);
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.4), new THREE.MeshStandardMaterial({color: 0xdddddd, roughness:0.8})); body.position.y = 0.6;
+        stGroup.add(head, body); stGroup.position.set(-4, 0.5, -2); stGroup.rotation.y = Math.PI/2; stGroup.traverse(c=>{if(c.isMesh)c.castShadow=true;});
+        const stHit = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.5, 1.5), hitMat); stHit.position.y = 1; stHit.userData = { id: 'student' }; stGroup.add(stHit);
+        group.add(stGroup); gameObjects.stage1.student = { head: head, eyes: [eyeL, eyeR] };
+
+        // Computer
+        const pcGroup = new THREE.Group();
+        const pcBase = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.1), new THREE.MeshStandardMaterial({color:0x111})); pcBase.position.y=0.2; pcBase.rotation.x = -0.1;
+        const normPcTex = createTextTexture('Windows', '#1e90ff', 'white', '40px'); const anoPcTex = createTextTexture('FATAL ERROR', '#aa0000', 'white', '40px');
+        const pcScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.3), new THREE.MeshBasicMaterial({map: normPcTex})); pcScreen.position.set(0, 0.2, 0.06); pcScreen.rotation.x = -0.1;
+        pcGroup.add(pcBase, pcScreen); pcGroup.position.set(0, 1.5, -7.5); pcGroup.castShadow=true;
+        const pcHit = new THREE.Mesh(new THREE.BoxGeometry(1.5,1.5,1.5), hitMat); pcHit.userData={id:'computer'}; pcGroup.add(pcHit);
+        group.add(pcGroup); gameObjects.stage1.computer = { mesh: pcScreen, norm: normPcTex, ano: anoPcTex };
+
+        // Desks
+        const deskTopMat = new THREE.MeshStandardMaterial({ map: globalTextures.wood, roughness: 0.4, metalness: 0.05, bumpMap: globalTextures.noiseBump, bumpScale: 0.01 });
+        const deskLegMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.8, roughness: 0.4 });
+        for(let i = -1; i <= 1; i++) {
+            for(let j = -1; j <= 1; j++) {
+                const desk = new THREE.Group();
+                const top = new THREE.Mesh(new THREE.BoxGeometry(2, 0.1, 1.5), deskTopMat); 
+                top.position.y = 1.2; top.castShadow=true; top.receiveShadow=true; desk.add(top);
+                [[0.9, -0.6], [-0.9, -0.6], [0.9, 0.6], [-0.9, 0.6]].forEach(p => {
+                    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.2, 0.1), deskLegMat); 
+                    leg.position.set(p[0], 0.6, p[1]); leg.castShadow=true; desk.add(leg);
+                });
+                desk.position.set(i * 4, 0, j * 3.5 - 2); group.add(desk);
+            }
+        }
+
+        // Poster
+        const pstGroup = new THREE.Group();
+        const pNorm = createTextTexture('保持安静', '#228B22', 'white', '60px'); const pAno = createTextTexture('保持安息', '#228B22', 'white', '60px');
+        const pst = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2), new THREE.MeshBasicMaterial({ map: pNorm })); 
+        pstGroup.add(pst); pstGroup.position.set(9.9, 4, -4); pstGroup.rotation.y = -Math.PI/2; 
+        const pHit = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), hitMat); pHit.userData = { id: 'poster' }; pstGroup.add(pHit);
+        group.add(pstGroup); gameObjects.stage1.poster = { mesh: pst, norm: pNorm, ano: pAno };
+
+        // Clock
+        const cg = new THREE.Group();
+        const face = new THREE.Mesh(new THREE.CircleGeometry(0.8, 32), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }));
+        const hand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.05), new THREE.MeshBasicMaterial({ color: 0x000000 })); hand.position.y = 0.3; 
+        const hp = new THREE.Group(); hp.position.z=0.02; hp.add(hand); 
+        cg.add(face, hp); cg.position.set(-9.8, 7, 0); cg.rotation.y = Math.PI/2;
+        const ch = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), hitMat); ch.userData = { id: 'clock' }; cg.add(ch);
+        group.add(cg); gameObjects.stage1.clock = { hand: hp };
+
+        // Door
+        const door = new THREE.Mesh(new THREE.BoxGeometry(3, 6, 0.2), new THREE.MeshStandardMaterial({ color: 0x4a2e15, roughness: 0.8, bumpMap: globalTextures.wood, bumpScale: 0.02 }));
+        door.position.set(0, 3, 9.9); group.add(door);
+        const doorHit = new THREE.Mesh(new THREE.BoxGeometry(4, 7, 2), hitMat); doorHit.position.copy(door.position); doorHit.userData = { id: 'door_stage1' }; group.add(doorHit);
+        gameObjects.stage1.door = door;
+
+        scene.add(group);
+    }
+
+    function buildStage2_Hallway() {
+        const group = new THREE.Group(); group.position.copy(STAGE_2_CENTER);
+        const HALL_LENGTH = 50, HALL_HEIGHT = 4.5, HALL_WIDTH = 6;
+        
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x6a7a8e, roughness: 0.9, bumpMap: globalTextures.noiseBump, bumpScale: 0.05 }); 
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.3, metalness: 0.3, bumpMap: globalTextures.noiseBump, bumpScale: 0.01 });
+
+        const roomGeo = new THREE.BoxGeometry(HALL_WIDTH, HALL_HEIGHT, HALL_LENGTH);
+        const room = new THREE.Mesh(roomGeo, wallMat); room.material.side = THREE.BackSide; room.position.set(0, HALL_HEIGHT/2, -HALL_LENGTH/2); group.add(room);
+        const fl = new THREE.Mesh(new THREE.PlaneGeometry(HALL_WIDTH, HALL_LENGTH), floorMat); fl.rotation.x = -Math.PI/2; fl.position.z = -HALL_LENGTH/2; fl.position.y = 0.02; group.add(fl);
+
+        // Exit Sign
+        const exitGroup = new THREE.Group();
+        const eNorm = createTextTexture('EXIT', '#00aa00', 'white', '70px'); const eAno = createTextTexture('EXIT', '#aa0000', 'white', '70px');
+        const exFace = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), new THREE.MeshBasicMaterial({ map: eNorm }));
+        exitGroup.add(exFace); exitGroup.position.set(0, HALL_HEIGHT - 0.6, -20);
+        const exHit = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2), hitMat); exHit.userData = { id: 'exit_sign' }; exitGroup.add(exHit);
+        group.add(exitGroup); gameObjects.stage2.exit_sign = { mesh: exFace, norm: eNorm, ano: eAno };
+
+        // Lockers
+        const lockerGroup = new THREE.Group();
+        const lNormMat = new THREE.MeshStandardMaterial({ color: 0x334455, metalness:0.4, roughness:0.5 });
+        const lAnoMat = new THREE.MeshStandardMaterial({ color: 0x881111, metalness:0.4, roughness:0.5 }); 
+        for(let i=0; i<10; i++) { 
+            const lk = new THREE.Mesh(new THREE.BoxGeometry(1, 4, 1), lNormMat); 
+            lk.position.set(HALL_WIDTH/2 - 0.5, 2, -10 - i*1.1); lockerGroup.add(lk); 
+        }
+        const lkHit = new THREE.Mesh(new THREE.BoxGeometry(2, 4.5, 12), hitMat); lkHit.position.set(HALL_WIDTH/2 - 0.5, 2, -15); lkHit.userData = { id: 'locker' }; lockerGroup.add(lkHit);
+        group.add(lockerGroup); gameObjects.stage2.locker = { group: lockerGroup, normMat: lNormMat, anoMat: lAnoMat };
+        
+        // Vending Machine
+        const vmGroup = new THREE.Group();
+        const vmBody = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3.5, 1), new THREE.MeshStandardMaterial({color:0xdddddd, metalness:0.5})); vmBody.position.y = 1.75; vmGroup.add(vmBody);
+        const vNorm = createTextTexture('DRINKS', '#111111', '#00aaff', '60px'); const vAno = createTextTexture('BLOOD', '#220000', '#ff0000', '60px');
+        const vmScreen = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 2.5), new THREE.MeshBasicMaterial({map: vNorm})); vmScreen.position.set(0, 2, 0.51); vmGroup.add(vmScreen);
+        vmGroup.position.set(-HALL_WIDTH/2 + 0.5, 0, -25); vmGroup.rotation.y = Math.PI/2;
+        const vmHit = new THREE.Mesh(new THREE.BoxGeometry(2,4,2), hitMat); vmHit.position.y=2; vmHit.userData={id:'vending_machine'}; vmGroup.add(vmHit);
+        group.add(vmGroup); gameObjects.stage2.vending_machine = { mesh: vmScreen, norm: vNorm, ano: vAno };
+
+        // Extinguisher
+        const ext = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1, 0.4), new THREE.MeshStandardMaterial({ color: 0xdd0000, metalness:0.3, roughness:0.4 }));
+        ext.position.set(-HALL_WIDTH/2 + 0.2, 1.5, -15); 
+        const extHit = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2, 1.5), hitMat); extHit.position.copy(ext.position); extHit.userData = { id: 'extinguisher' }; group.add(extHit);
+        group.add(ext); gameObjects.stage2.extinguisher = ext;
+
+        // End Door
+        const endDoorGroup = new THREE.Group(); endDoorGroup.position.set(0, HALL_HEIGHT/2, -HALL_LENGTH + 0.1);
+        const edPiv = new THREE.Group(); edPiv.position.set(-1.5, 0, 0);
+        const edMesh = new THREE.Mesh(new THREE.BoxGeometry(3, HALL_HEIGHT, 0.2), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        edMesh.position.set(1.5, 0, 0); edPiv.add(edMesh); endDoorGroup.add(edPiv);
+        const edHit = new THREE.Mesh(new THREE.BoxGeometry(5, HALL_HEIGHT, 2), hitMat); edHit.userData = { id: 'hall_door' }; endDoorGroup.add(edHit);
+        group.add(endDoorGroup); gameObjects.stage2.hall_door = edPiv;
+
+        scene.add(group);
+    }
+
+    function addCinematicLights() {
+        const ambient = new THREE.AmbientLight(0xffffff, 0.2); scene.add(ambient);
+        const mainLight = new THREE.PointLight(0xfffae6, 0.9, 30, 2); mainLight.position.set(0, 8, 0); mainLight.castShadow = true; 
+        mainLight.shadow.mapSize.width = 512; mainLight.shadow.mapSize.height = 512; mainLight.shadow.bias = -0.002; scene.add(mainLight);
+        const hallAmbient = new THREE.AmbientLight(0xffffff, 0.1); hallAmbient.position.copy(STAGE_2_CENTER); scene.add(hallAmbient);
+        for(let z = -10; z >= -45; z -= 15) {
+            const hl = new THREE.PointLight(0xccddff, 0.5, 15, 2); hl.position.set(STAGE_2_CENTER.x, 4, STAGE_2_CENTER.z + z); scene.add(hl);
+        }
+    }
+
+    // --- 游戏循环与核心逻辑 ---
     function setupDay() {
-        hasAnomalyToday = Math.random() < 0.5;
-        currentAnomalyId = hasAnomalyToday ? 'blackboard' : null;
-
-        // 重置环境
-        gameObjects.stage1.blackboard.material.color.setHex(hasAnomalyToday ? 0xff0000 : 0x113311);
+        gameObjects.stage1.blackboard.mesh.material.map = gameObjects.stage1.blackboard.norm;
+        gameObjects.stage1.poster.mesh.material.map = gameObjects.stage1.poster.norm;
+        gameObjects.stage1.computer.mesh.material.map = gameObjects.stage1.computer.norm;
+        gameObjects.stage1.door.material.color.setHex(0x4a2e15);
+        gameObjects.stage1.student.head.rotation.y = 0;
+        gameObjects.stage1.student.eyes.forEach(e => e.material.color.setHex(0x000000));
         
+        gameObjects.stage2.exit_sign.mesh.material.map = gameObjects.stage2.exit_sign.norm;
+        gameObjects.stage2.vending_machine.mesh.material.map = gameObjects.stage2.vending_machine.norm;
+        gameObjects.stage2.extinguisher.material.color.setHex(0xdd0000);
+        gameObjects.stage2.hall_door.rotation.y = 0;
+        if(gameObjects.stage2.locker) {
+            gameObjects.stage2.locker.group.children.forEach(c => { if(c.isMesh && c.geometry.type==="BoxGeometry" && c.material !== hitMat) c.material = gameObjects.stage2.locker.normMat; });
+        }
+
+        hasAnomalyToday = Math.random() < 0.5; 
+        if (hasAnomalyToday) {
+            if (currentStage === 1) { currentAnomalyId = interactableIds_1[Math.floor(Math.random() * interactableIds_1.length)]; applyAnomalyStage1(currentAnomalyId); }
+            else { currentAnomalyId = interactableIds_2[Math.floor(Math.random() * interactableIds_2.length)]; applyAnomalyStage2(currentAnomalyId); }
+        } else { currentAnomalyId = null; }
+
         document.getElementById('day-display').innerText = `第 ${currentDay} 天`;
-        resetPlayer();
+        document.getElementById('stage-desc').innerText = currentStage === 1 ? "LOC: CLASSROOM" : "LOC: HALLWAY";
+        
+        resetPlayerPosition();
     }
 
-    function triggerTransition(title, subtitle, isReset = false) {
-        if (isTransitioning) return;
-        isTransitioning = true;
+    function applyAnomalyStage1(id) {
+        switch(id) {
+            case 'blackboard': gameObjects.stage1.blackboard.mesh.material.map = gameObjects.stage1.blackboard.ano; break;
+            case 'poster': gameObjects.stage1.poster.mesh.material.map = gameObjects.stage1.poster.ano; break;
+            case 'computer': gameObjects.stage1.computer.mesh.material.map = gameObjects.stage1.computer.ano; break;
+            case 'door_stage1': gameObjects.stage1.door.material.color.setHex(0xaa0000); break;
+            case 'student': gameObjects.stage1.student.head.rotation.y = Math.PI; gameObjects.stage1.student.eyes.forEach(e => e.material.color.setHex(0xff0000)); break;
+        }
+    }
 
-        const screen = document.getElementById('transition-screen');
-        document.getElementById('transition-title').innerText = title;
-        document.getElementById('transition-desc').innerText = subtitle;
+    function applyAnomalyStage2(id) {
+        switch(id) {
+            case 'exit_sign': gameObjects.stage2.exit_sign.mesh.material.map = gameObjects.stage2.exit_sign.ano; break;
+            case 'vending_machine': gameObjects.stage2.vending_machine.mesh.material.map = gameObjects.stage2.vending_machine.ano; break;
+            case 'extinguisher': gameObjects.stage2.extinguisher.material.color.setHex(0x0000FF); break; 
+            case 'hall_door': gameObjects.stage2.hall_door.rotation.y = Math.PI / 4; break; 
+            case 'locker': 
+                gameObjects.stage2.locker.group.children.forEach(c => { if(c.isMesh && c.geometry.type==="BoxGeometry" && c.material !== hitMat) c.material = gameObjects.stage2.locker.anoMat; });
+                break;
+        }
+    }
+
+    // 核心安全转场：绝对无死锁
+    function triggerTransition(title, subtitle, isGameOver = false) {
+        if (isTransitioning) return;
+        isTransitioning = true; 
+        hideReportButton();
         
-        screen.classList.remove('hidden');
-        screen.style.opacity = '1';
+        const screen = document.getElementById('transition-screen');
+        document.getElementById('transition-title').innerText = title; 
+        document.getElementById('transition-desc').innerText = subtitle || "";
+        
+        screen.style.display = 'flex'; void screen.offsetWidth;
+        screen.classList.remove('hidden'); screen.style.opacity = '1';
 
         setTimeout(() => {
-            if (isReset) currentDay = 1;
-            setupDay();
-            
+            if (isGameOver) { currentDay = (currentStage === 2) ? 8 : 1; }
+            setupDay(); 
             screen.style.opacity = '0';
-            setTimeout(() => {
-                screen.classList.add('hidden');
-                isTransitioning = false;
-            }, 500);
+            setTimeout(() => { 
+                screen.classList.add('hidden'); 
+                isTransitioning = false; // 唯一解锁点
+                lastValidTarget = null;
+                currentLookTarget = null;
+            }, 600);
         }, 1500);
     }
 
-    // --- 交互响应 ---
-    function handleNormal() {
-        if (isTransitioning) return;
+    function handleStageTransition() {
+        if (currentDay === 8 && currentStage === 1) { 
+            currentStage = 2; triggerTransition("第一层突破", "进入无尽走廊", false); return true; 
+        }
+        return false;
+    }
+
+    // --- 极速 UI 响应 (解除了所有的双重判定锁死) ---
+    window.reportNormal = function() {
+        // 让 triggerTransition 自己去上锁
         if (hasAnomalyToday) {
-            triggerTransition("判断错误", "你漏掉了某个异常...", true);
+            triggerTransition("判断错误", `真正的异常是：${nameMap[currentAnomalyId]}\n时间重置回原点`, true);
         } else {
             currentDay++;
-            triggerTransition(`第 ${currentDay} 天`, "一切正常，继续前进");
+            if(currentDay > MAX_DAYS) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning = true; }
+            else if(!handleStageTransition()) { triggerTransition(`第 ${currentDay} 天`, "安全度过", false); }
         }
-    }
+    };
 
-    function handleReport() {
-        if (isTransitioning || !currentLookTarget) return;
-        if (hasAnomalyToday && currentLookTarget === currentAnomalyId) {
+    window.reportAnomaly = function() {
+        const reportTarget = currentLookTarget || lastValidTarget;
+        if (!reportTarget) {
+            triggerTransition("操作无效", "请将准星对准异常物体后再报告", false);
+            return; 
+        }
+
+        if (hasAnomalyToday && reportTarget === currentAnomalyId) {
             currentDay++;
-            triggerTransition("报告正确", "成功清除异常");
-        } else {
-            triggerTransition("报告错误", "那并不是异常...", true);
+            if(currentDay > MAX_DAYS) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning = true; }
+            else if(!handleStageTransition()) { triggerTransition("异常清除", `进入第 ${currentDay} 天`, false); }
+        } else { 
+            let errStr = hasAnomalyToday ? `真正的异常是：${nameMap[currentAnomalyId]}\n你却指认了：${nameMap[reportTarget]}` : `这里明明一切正常\n你却指认了：${nameMap[reportTarget]}`;
+            triggerTransition("判断错误", `${errStr}\n时间重置回原点`, true); 
         }
-    }
+    };
 
-    // --- 控制系统 ---
+    window.startGame = function() { 
+        initAudio(); 
+        document.getElementById('start-screen').classList.add('hidden'); 
+        setupDay(); 
+    };
+
+    function resetPlayerPosition() {
+        const center = currentStage === 1 ? STAGE_1_CENTER : STAGE_2_CENTER;
+        const zOffset = currentStage === 1 ? 6 : -2; 
+        
+        camera.position.set(center.x, CAMERA_HEIGHT, center.z + zOffset); 
+        targetRotationX = 0; targetRotationY = currentStage === 1 ? 0 : Math.PI; 
+        camera.rotation.set(targetRotationX, targetRotationY, 0, 'YXZ');
+        prevCamRotX = targetRotationX; prevCamRotY = targetRotationY;
+        
+        moveState.forward = 0; moveState.right = 0;
+        yVelocity = 0; isGrounded = true; window.toggleSprint(false); 
+        stepAccumulator = 0; lastStepIndex = 0;
+
+        earringsSystem.forEach(sys => {
+            camera.updateMatrixWorld(true);
+            let anchorWorld = sys.anchorLocal.clone().applyMatrix4(camera.matrixWorld);
+            sys.nodes.forEach(n => { n.pos.copy(anchorWorld); n.oldPos.copy(anchorWorld); });
+        });
+    }
+    
+    window.resetView = resetPlayerPosition;
+    window.playerJump = function() { if (isGrounded && !isTransitioning) { yVelocity = JUMP_FORCE; isGrounded = false; } }
+
+    window.toggleSprint = function(forceVal = null) {
+        if(forceVal !== null) { isSprinting = forceVal; } else { isSprinting = !isSprinting; }
+        const btn = document.getElementById('sprint-btn'); const txt = document.getElementById('sprint-txt');
+        if(btn) {
+            // 已将 isSSprint 改为 isSprinting
+            if(isSprinting) { btn.classList.add('btn-active-state'); txt.innerText = '奔跑中'; } 
+            else { btn.classList.remove('btn-active-state'); txt.innerText = '步行中'; }
+        }
+    };
+
+    // 严密封闭式防抖绑定 (杜绝一切死锁)
     function setupControls() {
-        const startBtn = document.getElementById('start-btn');
-        startBtn.onclick = () => {
-            document.getElementById('start-screen').classList.add('hidden');
-            setupDay();
+        const attachSafe = (id, fn) => {
+            const el = document.getElementById(id); if(!el) return;
+            let locked = false;
+            const trigger = (e) => {
+                e.preventDefault(); e.stopPropagation(); 
+                if(locked) return; locked = true; fn();
+                setTimeout(() => { locked = false; }, 300); // 300ms防连点
+            };
+            el.addEventListener('touchstart', trigger, {passive: false});
+            el.addEventListener('mousedown', trigger);
         };
+        attachSafe('normal-btn', window.reportNormal);
+        attachSafe('report-btn', window.reportAnomaly);
+        attachSafe('start-btn', window.startGame);
+        attachSafe('jump-btn', window.playerJump);
+        attachSafe('sprint-btn', window.toggleSprint);
+        attachSafe('reset-btn', window.resetView);
 
-        document.getElementById('normal-btn').onclick = handleNormal;
-        document.getElementById('report-btn').onclick = handleReport;
-        document.getElementById('reset-btn').onclick = resetPlayer;
-
-        // 键盘
-        window.addEventListener('keydown', (e) => {
+        document.addEventListener('keydown', (e) => {
+            if(isTransitioning) return;
             switch(e.code) {
-                case 'KeyW': moveState.forward = 1; break;
-                case 'KeyS': moveState.forward = -1; break;
-                case 'KeyA': moveState.right = -1; break;
-                case 'KeyD': moveState.right = 1; break;
-                case 'ShiftLeft': toggleSprint(true); break;
-                case 'Space': jump(); break;
+                case 'KeyW': case 'ArrowUp': moveState.forward = 1; break;
+                case 'KeyS': case 'ArrowDown': moveState.forward = -1; break;
+                case 'KeyA': case 'ArrowLeft': moveState.right = -1; break;
+                case 'KeyD': case 'ArrowRight': moveState.right = 1; break;
+                case 'Space': window.playerJump(); break;
+                case 'ShiftLeft': case 'ShiftRight': window.toggleSprint(true); break; 
             }
         });
-        window.addEventListener('keyup', (e) => {
+        document.addEventListener('keyup', (e) => {
             switch(e.code) {
-                case 'KeyW': case 'KeyS': moveState.forward = 0; break;
-                case 'KeyA': case 'KeyD': moveState.right = 0; break;
-                case 'ShiftLeft': toggleSprint(false); break;
+                case 'KeyW': case 'ArrowUp': case 'KeyS': case 'ArrowDown': moveState.forward = 0; break;
+                case 'KeyA': case 'ArrowLeft': case 'KeyD': case 'ArrowRight': moveState.right = 0; break;
+                case 'ShiftLeft': case 'ShiftRight': window.toggleSprint(false); break; 
             }
         });
 
-        // 鼠标视角
-        let isPointerLocked = false;
-        renderer.domElement.addEventListener('click', () => {
-            if (!isTransitioning) renderer.domElement.requestPointerLock();
-        });
+        const joyBase = document.getElementById('joystick-base'); const joyStick = document.getElementById('joystick-stick');
+        let moveTouchId = null; let joyCenter;
+        
+        joyBase.addEventListener('touchstart', (e) => {
+            e.preventDefault(); e.stopPropagation(); if(isTransitioning) return;
+            joyCenter = { x: joyBase.getBoundingClientRect().left + 65, y: joyBase.getBoundingClientRect().top + 65 };
+            moveTouchId = e.changedTouches[0].identifier; joyStick.style.transition = 'none'; updateJoy(e.changedTouches[0]);
+        }, {passive: false});
+        joyBase.addEventListener('touchmove', (e) => {
+            e.preventDefault(); e.stopPropagation(); if(isTransitioning) return;
+            for(let i=0; i<e.changedTouches.length; i++) { if(e.changedTouches[i].identifier === moveTouchId) updateJoy(e.changedTouches[i]); }
+        }, {passive: false});
+        const stopJoy = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            for(let i=0; i<e.changedTouches.length; i++) {
+                if(e.changedTouches[i].identifier === moveTouchId) {
+                    moveTouchId = null; moveState.forward = 0; moveState.right = 0; 
+                    joyStick.style.transition = 'transform 0.1s'; joyStick.style.transform = 'translate(-50%, -50%)';
+                }
+            }
+        };
+        joyBase.addEventListener('touchend', stopJoy); joyBase.addEventListener('touchcancel', stopJoy);
+
+        function updateJoy(touch) {
+            let dx = touch.clientX - joyCenter.x, dy = touch.clientY - joyCenter.y;
+            let dist = Math.sqrt(dx*dx + dy*dy); if(dist > 50) { dx = (dx/dist)*50; dy = (dy/dist)*50; }
+            joyStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+            moveState.right = dx / 50; moveState.forward = -dy / 50; 
+        }
+
+        const canvas = renderer.domElement; let lookTouchId = null;
+        canvas.addEventListener('mousedown', (e) => { isLooking = true; prevLookX = e.clientX; prevLookY = e.clientY; });
         document.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement === renderer.domElement && !isTransitioning) {
-                camera.rotation.y -= e.movementX * 0.002;
-                camera.rotation.x -= e.movementY * 0.002;
-                camera.rotation.x = Math.max(-1.5, Math.min(1.5, camera.rotation.x));
+            if (isLooking && !isTransitioning) {
+                targetRotationY -= (e.clientX - prevLookX) * 0.005; targetRotationX -= (e.clientY - prevLookY) * 0.005;
+                targetRotationX = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, targetRotationX));
+                prevLookX = e.clientX; prevLookY = e.clientY;
             }
         });
+        document.addEventListener('mouseup', () => isLooking = false);
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); if(isTransitioning) return;
+            for(let i=0; i<e.changedTouches.length; i++) {
+                if (lookTouchId === null) { lookTouchId = e.changedTouches[i].identifier; prevLookX = e.changedTouches[i].clientX; prevLookY = e.changedTouches[i].clientY; }
+            }
+        }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault(); if(isTransitioning) return;
+            for(let i=0; i<e.changedTouches.length; i++) {
+                if(e.changedTouches[i].identifier === lookTouchId) {
+                    targetRotationY -= (e.changedTouches[i].clientX - prevLookX) * 0.006; targetRotationX -= (e.changedTouches[i].clientY - prevLookY) * 0.006;
+                    targetRotationX = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, targetRotationX));
+                    prevLookX = e.changedTouches[i].clientX; prevLookY = e.changedTouches[i].clientY;
+                }
+            }
+        }, {passive: false});
+        const stopLook = (e) => { for(let i=0; i<e.changedTouches.length; i++) { if(e.changedTouches[i].identifier === lookTouchId) lookTouchId = null; } };
+        canvas.addEventListener('touchend', stopLook); canvas.addEventListener('touchcancel', stopLook);
     }
 
-    function toggleSprint(active) {
-        isSprinting = active;
-        const btn = document.getElementById('sprint-btn');
-        if (btn) {
-            btn.innerText = isSprinting ? '奔跑中' : '步行';
-            isSprinting ? btn.classList.add('btn-active') : btn.classList.remove('btn-active');
+    function onWindowResize() { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+
+    function updateMovement() {
+        if (isTransitioning) return;
+        camera.rotation.y += (targetRotationY - camera.rotation.y) * 0.3; camera.rotation.x += (targetRotationX - camera.rotation.x) * 0.3;
+
+        if (!isGrounded || yVelocity !== 0) {
+            yVelocity -= GRAVITY; camera.position.y += yVelocity;
+            if (camera.position.y <= CAMERA_HEIGHT) { camera.position.y = CAMERA_HEIGHT; yVelocity = 0; isGrounded = true; }
+        }
+
+        let targetSpeed = isSprinting ? SPRINT_SPEED : WALK_SPEED;
+        currentSpeed += (targetSpeed - currentSpeed) * 0.15;
+        let tFov = isSprinting ? 95 : 75; 
+        camera.fov += (tFov - camera.fov) * 0.1; camera.updateProjectionMatrix();
+
+        let isMoving = Math.abs(moveState.forward) > 0 || Math.abs(moveState.right) > 0;
+
+        if (isMoving) {
+            const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
+            const rightDir = new THREE.Vector3().crossVectors(dir, camera.up).normalize();
+
+            camera.position.addScaledVector(dir, moveState.forward * currentSpeed);
+            camera.position.addScaledVector(rightDir, moveState.right * currentSpeed);
+
+            const cx = currentStage === 1 ? STAGE_1_CENTER.x : STAGE_2_CENTER.x;
+            const bx = currentStage === 1 ? 8.5 : 2.5;  
+            const bzMin = currentStage === 1 ? -8.5 : -49; 
+            const bzMax = currentStage === 1 ? 8.5 : -1;
+
+            camera.position.x = Math.max(cx - bx, Math.min(cx + bx, camera.position.x));
+            camera.position.z = Math.max(bzMin, Math.min(bzMax, camera.position.z));
+            
+            if (isGrounded) {
+                stepAccumulator += currentSpeed * (isSprinting ? 2.5 : 2.0);
+                let currentStepIndex = Math.floor(stepAccumulator / Math.PI);
+                if(currentStepIndex > lastStepIndex) {
+                    playHeelStep(isSprinting ? 1.0 : 0.6);
+                    lastStepIndex = currentStepIndex;
+                }
+
+                const bobFreq = isSprinting ? 0.03 : 0.015; 
+                const bobAmp = isSprinting ? 0.15 : 0.06; 
+                camera.position.y = CAMERA_HEIGHT + Math.sin(Date.now() * bobFreq) * bobAmp * (Math.abs(moveState.forward) + Math.abs(moveState.right));
+            }
+        } else if (isGrounded) { camera.position.y += (CAMERA_HEIGHT - camera.position.y) * 0.2; }
+
+        // --- 身体高跟鞋步伐渲染 (防穿模且朝向正向) ---
+        const footOffsetX = 0.15; 
+        const footOffsetZ = 0.15; 
+        const leftBase = new THREE.Vector3(-footOffsetX, 0, -footOffsetZ);
+        leftBase.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y);
+        leftBase.add(camera.position);
+
+        const rightBase = new THREE.Vector3(footOffsetX, 0, -footOffsetZ);
+        rightBase.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y);
+        rightBase.add(camera.position);
+
+        let liftL = 0, liftR = 0;
+        if(isMoving && isGrounded) {
+            liftL = Math.max(0, Math.sin(stepAccumulator));
+            liftR = Math.max(0, Math.sin(stepAccumulator + Math.PI));
+        }
+
+        leftShoeMesh.position.set(leftBase.x, 0.02 + liftL * 0.12, leftBase.z);
+        rightShoeMesh.position.set(rightBase.x, 0.02 + liftR * 0.12, rightBase.z);
+        leftShoeMesh.rotation.set(liftL * -0.2, camera.rotation.y, 0);
+        rightShoeMesh.rotation.set(liftR * -0.2, camera.rotation.y, 0);
+    }
+
+    function checkRaycast() {
+        if (isTransitioning) return;
+        raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        
+        let foundTarget = null;
+        for (let i=0; i<intersects.length; i++) {
+            if (intersects[i].distance > 15) continue; 
+            if (intersects[i].object.userData.id) { foundTarget = intersects[i].object.userData.id; break; }
+        }
+
+        if (foundTarget) { 
+            currentLookTarget = foundTarget; 
+            lastValidTarget = foundTarget; 
+            showReportButton(); 
+        } else { 
+            currentLookTarget = null; 
+            hideReportButton(); 
         }
     }
 
-    function jump() {
-        if (isGrounded && !isTransitioning) {
-            yVelocity = JUMP_FORCE;
-            isGrounded = false;
+    function showReportButton() {
+        const btn = document.getElementById('report-btn');
+        const tgtName = document.getElementById('target-name');
+        if (btn.classList.contains('hidden')) {
+            btn.classList.remove('hidden'); document.getElementById('crosshair').classList.add('crosshair-active');
+        }
+        const newText = `目标: ${nameMap[lastValidTarget] || '未知'}`;
+        if (tgtName.innerText !== newText) tgtName.innerText = newText;
+    }
+    
+    function hideReportButton() {
+        const btn = document.getElementById('report-btn');
+        if (!btn.classList.contains('hidden')) {
+            btn.classList.add('hidden'); document.getElementById('crosshair').classList.remove('crosshair-active');
         }
     }
 
-    function resetPlayer() {
-        camera.position.set(0, 1.6, 8);
-        camera.rotation.set(0, 0, 0);
-    }
-
-    // --- 主循环 ---
     function animate() {
         requestAnimationFrame(animate);
+        updateMovement();
+        updateEarringsPhysics();
+        checkRaycast();
+
         if (!isTransitioning) {
-            // 移动逻辑
-            const speed = isSprinting ? SPRINT_SPEED : WALK_SPEED;
-            const dir = new THREE.Vector3();
-            camera.getWorldDirection(dir);
-            dir.y = 0; dir.normalize();
-            const side = new THREE.Vector3().crossVectors(camera.up, dir).normalize();
-
-            camera.position.addScaledVector(dir, moveState.forward * speed);
-            camera.position.addScaledVector(side, -moveState.right * speed);
-
-            // 重力
-            if (!isGrounded) {
-                yVelocity -= GRAVITY;
-                camera.position.y += yVelocity;
-                if (camera.position.y <= 1.6) {
-                    camera.position.y = 1.6;
-                    isGrounded = true;
-                }
-            }
-
-            // 射线交互检测
-            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-            const intersects = raycaster.intersectObjects(scene.children);
-            let found = null;
-            for (let i = 0; i < intersects.length; i++) {
-                if (intersects[i].distance < 25 && intersects[i].object.userData.id) {
-                    found = intersects[i].object.userData.id;
-                    break;
-                }
-            }
-
-            if (found) {
-                currentLookTarget = found;
-                document.getElementById('report-btn').classList.remove('hidden');
-                document.getElementById('target-name').innerText = nameMap[found] || found;
-                document.getElementById('crosshair').classList.add('crosshair-active');
-            } else {
-                currentLookTarget = null;
-                document.getElementById('report-btn').classList.add('hidden');
-                document.getElementById('crosshair').classList.remove('crosshair-active');
+            if (currentStage === 1) {
+                if(hasAnomalyToday && currentAnomalyId === 'clock') gameObjects.stage1.clock.hand.rotation.z += 0.05; 
+                else gameObjects.stage1.clock.hand.rotation.z -= 0.01; 
             }
         }
         renderer.render(scene, camera);
     }
 
     window.onload = init;
-    window.onresize = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    };
 </script>
 </body>
 </html>
