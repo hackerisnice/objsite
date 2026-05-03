@@ -773,9 +773,7 @@
     };
 
     window.reportAnomaly = function() {
-        const now = performance.now();
-        const canUseLastTarget = lastValidTarget && (now - lastLookTargetAt) < 350;
-        const reportTarget = currentLookTarget || (canUseLastTarget ? lastValidTarget : null);
+        const reportTarget = currentLookTarget;
         if (!reportTarget) {
             triggerTransition("操作无效", "请将准星对准异常物体后再报告", false);
             return; 
