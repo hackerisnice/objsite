@@ -160,6 +160,7 @@
     const MAX_DAYS = 14;
     let hasAnomalyToday = false, currentAnomalyId = null; 
     let isTransitioning = false, currentLookTarget = null, lastValidTarget = null; 
+    let lastLookTargetAt = 0; 
 
     const gameObjects = { stage1: {}, stage2: {} };
     // 鞋子不再是异常，它是身体部位！
@@ -772,7 +773,9 @@
     };
 
     window.reportAnomaly = function() {
-        const reportTarget = currentLookTarget || lastValidTarget;
+        const now = performance.now();
+        const canUseLastTarget = lastValidTarget && (now - lastLookTargetAt) < 350;
+        const reportTarget = currentLookTarget || (canUseLastTarget ? lastValidTarget : null);
         if (!reportTarget) {
             triggerTransition("操作无效", "请将准星对准异常物体后再报告", false);
             return; 
@@ -1011,9 +1014,11 @@
         if (foundTarget) { 
             currentLookTarget = foundTarget; 
             lastValidTarget = foundTarget; 
+            lastLookTargetAt = performance.now(); 
             showReportButton(); 
         } else { 
             currentLookTarget = null; 
+            lastValidTarget = null; 
             hideReportButton(); 
         }
     }
