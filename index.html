@@ -101,15 +101,11 @@
         </div>
     </div>
 
-    <!-- 报告异常 -->
-    <div class="absolute top-[55%] left-1/2 transform -translate-x-1/2 -translate-y-1/2 interactive flex flex-col items-center">
-        <button id="report-btn" class="hidden px-8 py-3 bg-red-700/95 text-white font-bold rounded-xl border border-red-400 active:scale-95 flex items-center gap-3 backdrop-blur-md shadow-[0_0_30px_rgba(255,0,0,0.6)] transition-transform">
-            <span class="text-3xl pointer-none">⚠️</span> 
-            <div class="flex flex-col items-start pointer-none">
-                <span class="text-xl tracking-widest leading-none">报告异常</span>
-                <span id="target-name" class="text-[11px] text-yellow-300 mt-1 font-mono tracking-wide">目标: 未知</span>
-            </div>
-        </button>
+    <!-- 异常选择面板（替代报告按钮） -->
+    <div id="anomaly-panel" class="hidden absolute top-[55%] left-1/2 transform -translate-x-1/2 -translate-y-1/2 interactive z-40 bg-black/80 border border-red-500 rounded-xl p-4 backdrop-blur-md w-[320px]">
+        <p id="anomaly-panel-title" class="text-white font-bold text-sm mb-2">请选择异常事物</p>
+        <select id="anomaly-select" class="w-full bg-gray-900 text-white border border-gray-600 rounded px-3 py-2 text-sm mb-3"></select>
+        <button id="anomaly-submit-btn" class="w-full py-2 bg-red-700 text-white font-bold rounded-lg active:scale-95">确认上报</button>
     </div>
 
     <div id="joystick-base" class="hidden"><div id="joystick-stick"></div></div>
@@ -704,6 +700,7 @@
 
         document.getElementById('day-display').innerText = `第 ${currentDay} 天`;
         document.getElementById('stage-desc').innerText = currentStage === 1 ? "LOC: CLASSROOM" : "LOC: HALLWAY";
+        updateAnomalyPanel();
         
         resetPlayerPosition();
     }
@@ -743,7 +740,6 @@
     function triggerTransition(title, subtitle, isGameOver = false) {
         if (isTransitioning) return;
         isTransitioning = true; 
-        hideReportButton();
 
         const forceUnlockTimer = setTimeout(() => {
             isTransitioning = false;
@@ -804,19 +800,22 @@
 
     window.reportAnomaly = function() {
         if (isTransitioning) return;
-        const reportTarget = currentLookTarget;
-        if (!reportTarget) {
-            triggerTransition("操作无效", "请将准星对准异常物体后再报告", false);
-            return; 
+        const selected = document.getElementById('anomaly-select').value;
+        if (!selected) {
+            triggerTransition("操作无效", "请先选择异常事物", false);
+            return;
         }
 
-        if (hasAnomalyToday && reportTarget === currentAnomalyId) {
+        if (hasAnomalyToday && selected === currentAnomalyId) {
             currentDay++;
             if(currentDay > MAX_DAYS) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning = true; }
             else if(!handleStageTransition()) { triggerTransition("异常清除", `进入第 ${currentDay} 天`, false); }
-        } else { 
-            let errStr = hasAnomalyToday ? `真正的异常是：${nameMap[currentAnomalyId]}\n你却指认了：${nameMap[reportTarget]}` : `这里明明一切正常\n你却指认了：${nameMap[reportTarget]}`;
-            triggerTransition("判断错误", `${errStr}\n时间重置回原点`, true); 
+        } else {
+            let errStr = hasAnomalyToday ? `真正的异常是：${nameMap[currentAnomalyId]}
+你却指认了：${nameMap[selected]}` : `这里明明一切正常
+你却指认了：${nameMap[selected]}`;
+            triggerTransition("判断错误", `${errStr}
+时间重置回原点`, true);
         }
     };
 
@@ -882,11 +881,11 @@
             el.addEventListener('mousedown', trigger);
         };
         attachSafe('normal-btn', window.reportNormal);
-        attachSafe('report-btn', window.reportAnomaly);
         attachSafe('start-btn', window.startGame);
         attachSafe('jump-btn', window.playerJump);
         attachSafe('sprint-btn', window.toggleSprint);
         attachSafe('reset-btn', window.resetView);
+        attachSafe('anomaly-submit-btn', window.reportAnomaly);
 
         document.addEventListener('keydown', (e) => {
             if(isTransitioning) return;
@@ -1053,30 +1052,32 @@
             currentLookTarget = foundTarget; 
             lastValidTarget = foundTarget; 
             lastLookTargetAt = performance.now(); 
-            showReportButton(); 
         } else { 
             currentLookTarget = null; 
-            if ((performance.now() - lastLookTargetAt) > TARGET_MEMORY_MS) {
-                lastValidTarget = null; 
-                hideReportButton(); 
-            }
+            lastValidTarget = null; 
         }
+        updateAnomalyPanel();
     }
 
-    function showReportButton() {
-        const btn = document.getElementById('report-btn');
-        const tgtName = document.getElementById('target-name');
-        if (btn.classList.contains('hidden')) {
-            btn.classList.remove('hidden'); document.getElementById('crosshair').classList.add('crosshair-active');
-        }
-        const newText = `目标: ${nameMap[lastValidTarget] || '未知'}`;
-        if (tgtName.innerText !== newText) tgtName.innerText = newText;
-    }
-    
-    function hideReportButton() {
-        const btn = document.getElementById('report-btn');
-        if (!btn.classList.contains('hidden')) {
-            btn.classList.add('hidden'); document.getElementById('crosshair').classList.remove('crosshair-active');
+    function updateAnomalyPanel() {
+        const panel = document.getElementById('anomaly-panel');
+        const title = document.getElementById('anomaly-panel-title');
+        const select = document.getElementById('anomaly-select');
+        if (!panel || !title || !select) return;
+
+        const entryTarget = currentStage === 1 ? 'blackboard' : 'hall_door';
+        const stageName = currentStage === 1 ? '黑板' : '大门旁公告栏';
+        const stageOptions = currentStage === 1 ? interactableIds_1 : interactableIds_2;
+
+        if (currentLookTarget === entryTarget) {
+            panel.classList.remove('hidden');
+            title.innerText = `在${stageName}选择异常事物`;
+            const prev = select.value;
+            select.innerHTML = `<option value="">-- 请选择 --</option>` + stageOptions.map(id => `<option value="${id}">${nameMap[id]}</option>`).join('');
+            if (stageOptions.includes(prev)) select.value = prev;
+        } else {
+            panel.classList.add('hidden');
+            select.value = '';
         }
     }
 
