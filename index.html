@@ -314,6 +314,24 @@
     }
 
     // --- 📦 并发加载 真实提取几何体防偏移 ---
+
+    function loadObjWithFallback(loader, urls, onLoad, onProgress, onErrorFinal) {
+        let idx = 0;
+        const tryLoad = () => {
+            loader.load(
+                urls[idx],
+                onLoad,
+                onProgress,
+                () => {
+                    idx += 1;
+                    if (idx < urls.length) tryLoad();
+                    else if (onErrorFinal) onErrorFinal();
+                }
+            );
+        };
+        tryLoad();
+    }
+
     function loadCustomOBJs() {
         if (typeof THREE.OBJLoader === 'undefined') {
             document.getElementById('obj-status').innerHTML = '<span class="text-red-400">❌ 引擎库异常</span>';
@@ -322,7 +340,11 @@
         const objLoader = new THREE.OBJLoader();
 
         // --- 1. Earring.obj ---
-        const earringUrl = 'https://hackerisnice.github.io/objsite/Earring.obj';
+        const earringUrls = [
+            'https://hackerisnice.github.io/objsite/Earring.obj',
+            'https://hackerisnice.github.io/objsite/earring.obj',
+            'https://hackerisnice.github.io/objsite/Earring.OBJ'
+        ];
         const earringMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1.0, roughness: 0.1, emissive: 0x667788, emissiveIntensity: 0.5 });
         const fallbackGeo = new THREE.OctahedronGeometry(0.0035, 0); 
         const linkGeo = new THREE.CylinderGeometry(0.0005, 0.0005, 0.02, 4);
@@ -346,8 +368,8 @@
             earringsSystem.push(sys);
         }
 
-        objLoader.load(
-            earringUrl,
+        loadObjWithFallback(objLoader,
+            earringUrls,
             (object) => {
                 let extractedGeo = null;
                 object.traverse((child) => { 
@@ -376,11 +398,21 @@
                             tailGroup.add(finalMesh); 
                         });
                         objProgress.earringDone = true; updateObjUI();
+                    } else {
+                        objProgress.earringDone = true;
+                        updateObjUI();
                     }
+                } else {
+                    objProgress.earringDone = true;
+                    updateObjUI();
                 }
             },
             (xhr) => { if (xhr.lengthComputable) { objProgress.earring = (xhr.loaded / xhr.total) * 100; updateObjUI(); } },
-            () => { objProgress.earringDone = true; updateObjUI(); } 
+            () => {
+                objProgress.earringDone = false;
+                document.getElementById('obj-status').innerHTML = '<span class="text-red-400">⚠️ 耳坠模型加载失败，使用占位模型</span>';
+                updateObjUI();
+            }
         );
 
         // --- 2. Shoe.obj (作为玩家第一人称身体) ---
