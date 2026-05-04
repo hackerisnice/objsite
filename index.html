@@ -151,6 +151,12 @@
         <button onclick="location.reload()" class="px-12 py-4 bg-black text-white font-bold rounded-full text-xl shadow-2xl hover:scale-105 transition-transform">重返现实</button>
     </div>
 
+    <div id="fail-screen" class="hidden absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center p-8 text-center interactive z-50">
+        <h2 class="text-5xl font-black mb-4 text-red-200 tracking-tighter">被怪物抓住了</h2>
+        <p class="text-lg text-red-100 font-bold mb-8">它已经贴到你脸上，循环再次开始。</p>
+        <button onclick="location.reload()" class="px-10 py-3 bg-black text-white font-bold rounded-full text-lg shadow-2xl hover:scale-105 transition-transform">重新挑战</button>
+    </div>
+
     <div id="transition-screen" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center">
         <h2 id="transition-title" class="text-4xl md:text-6xl font-black text-white mb-4 drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]"></h2>
         <p id="transition-desc" class="text-red-500 text-base md:text-xl font-bold tracking-widest max-w-sm leading-relaxed whitespace-pre-wrap"></p>
@@ -188,6 +194,8 @@
     let currentShoe = "heels", stamina = 100, isFallen = false, fallRecoverAt = 0;
     let monsterMesh = null;
     const runnerObstacles = [];
+    let fallAnimUntil = 0, faceFailAnimUntil = 0;
+    let screenShakeUntil = 0, shakeStrength = 0;
     
     // --- 运动与步伐物理 ---
     const moveState = { forward: 0, right: 0 }; 
@@ -838,11 +846,29 @@
         }
     };
 
+    function triggerScreenShake(duration = 280, strength = 0.15) {
+        screenShakeUntil = performance.now() + duration;
+        shakeStrength = Math.max(shakeStrength, strength);
+    }
+
+    function triggerMonsterFaceFail() {
+        if (isTransitioning) return;
+        faceFailAnimUntil = performance.now() + 900;
+        isTransitioning = true;
+        triggerScreenShake(900, 0.55);
+        setTimeout(() => {
+            document.getElementById('fail-screen').classList.remove('hidden');
+        }, 920);
+    }
+
     function initRunnerMode() {
         document.getElementById('anomaly-panel').classList.add('hidden');
         document.getElementById('normal-btn').classList.add('hidden');
         document.getElementById('shoe-inventory').classList.remove('hidden');
         runnerDistance = 0; stamina = 100; currentShoe = 'heels';
+        isFallen = false;
+        fallAnimUntil = 0;
+        faceFailAnimUntil = 0;
         runnerObstacles.forEach(o => scene.remove(o)); runnerObstacles.length = 0;
         for (let i=1; i<=120; i++) {
             if (Math.random() < 0.22) {
@@ -1014,8 +1040,14 @@
     function updateMovement() {
         if (isRunnerMode) {
             const now = performance.now();
-            if (isFallen) { if (now >= fallRecoverAt) isFallen = false; else return; }
-            moveState.forward = 1;
+            if (isFallen) {
+                if (now >= fallRecoverAt) isFallen = false;
+                else {
+                    moveState.forward = 0;
+                    moveState.right = 0;
+                }
+            }
+            if (!isFallen) moveState.forward = 1;
         }
         if (isTransitioning) return;
         camera.rotation.y += (targetRotationY - camera.rotation.y) * 0.3; camera.rotation.x += (targetRotationX - camera.rotation.x) * 0.3;
@@ -1071,15 +1103,49 @@
                 if (!o.visible) return;
                 const d = o.position.distanceTo(camera.position);
                 if (d < 0.8 && o.userData.type === 'low_obstacle' && currentShoe === 'heels') {
-                    isFallen = true; fallRecoverAt = performance.now() + 1200; yVelocity = -0.05;
+                    isFallen = true;
+                    fallRecoverAt = performance.now() + 1200;
+                    fallAnimUntil = performance.now() + 500;
+                    yVelocity = -0.05;
+                    triggerScreenShake(420, 0.28);
                 }
                 if (d < 0.9 && o.userData.type === 'sneaker_pickup') { o.visible = false; stamina = Math.min(100, stamina + 40); }
             });
             if (monsterMesh) {
                 monsterMesh.position.lerp(new THREE.Vector3(camera.position.x,1.1,camera.position.z+3.2),0.02);
-                if (monsterMesh.position.distanceTo(camera.position) < 2.2) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning=true; }
+                if (monsterMesh.position.distanceTo(camera.position) < 2.2) { triggerMonsterFaceFail(); }
             }
             if (runnerDistance >= 10000) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning=true; }
+        }
+
+        const nowFx = performance.now();
+        const shakeActive = nowFx < screenShakeUntil;
+        if (shakeActive) {
+            const decay = (screenShakeUntil - nowFx) / 300;
+            const jitterX = (Math.random() - 0.5) * shakeStrength * decay;
+            const jitterY = (Math.random() - 0.5) * shakeStrength * decay;
+            camera.rotation.z = jitterX * 0.08;
+            camera.position.x += jitterX;
+            camera.position.y += jitterY * 0.4;
+        } else {
+            camera.rotation.z *= 0.75;
+            shakeStrength *= 0.8;
+        }
+
+        if (nowFx < fallAnimUntil) {
+            const t = 1 - ((fallAnimUntil - nowFx) / 500);
+            camera.rotation.x = Math.min(MAX_PITCH, camera.rotation.x + 0.04 * (1 - t));
+            camera.rotation.z -= 0.06 * (1 - t);
+        }
+
+        if (nowFx < faceFailAnimUntil && monsterMesh) {
+            const p = 1 - ((faceFailAnimUntil - nowFx) / 900);
+            monsterMesh.position.lerp(new THREE.Vector3(camera.position.x, 1.45, camera.position.z - 0.25), 0.25 + p * 0.35);
+            monsterMesh.scale.setScalar(1 + p * 1.2);
+            camera.fov = 75 + p * 25;
+            camera.updateProjectionMatrix();
+        } else if (monsterMesh) {
+            monsterMesh.scale.lerp(new THREE.Vector3(1,1,1), 0.2);
         }
 
         // --- 身体高跟鞋步伐渲染 (防穿模且朝向正向) ---
