@@ -159,6 +159,7 @@
     // --- 核心状态 ---
     let currentDay = 1, currentStage = 1; 
     const MAX_DAYS = 14;
+    const TRANSITION_UNLOCK_MS = 2800;
     let hasAnomalyToday = false, currentAnomalyId = null; 
     let isTransitioning = false, currentLookTarget = null, lastValidTarget = null; 
     let lastLookTargetAt = 0; 
@@ -743,6 +744,15 @@
         if (isTransitioning) return;
         isTransitioning = true; 
         hideReportButton();
+
+        const forceUnlockTimer = setTimeout(() => {
+            isTransitioning = false;
+            const screenEl = document.getElementById('transition-screen');
+            if (screenEl) {
+                screenEl.style.opacity = '0';
+                screenEl.classList.add('hidden');
+            }
+        }, TRANSITION_UNLOCK_MS);
         
         const screen = document.getElementById('transition-screen');
         document.getElementById('transition-title').innerText = title; 
@@ -763,6 +773,7 @@
                 screen.style.opacity = '0';
                 setTimeout(() => {
                     screen.classList.add('hidden');
+                    clearTimeout(forceUnlockTimer);
                     isTransitioning = false; // 强制解锁，防止死锁
                     lastValidTarget = null;
                     currentLookTarget = null;
@@ -856,8 +867,17 @@
             let locked = false;
             const trigger = (e) => {
                 e.preventDefault(); e.stopPropagation(); 
-                if(locked) return; locked = true; fn();
-                setTimeout(() => { locked = false; }, 300); // 300ms防连点
+                if(locked) return;
+                locked = true;
+                try {
+                    fn();
+                } catch (err) {
+                    console.error('button handler failed:', err);
+                    showRuntimeError('按钮事件执行失败，请重试');
+                    isTransitioning = false;
+                } finally {
+                    setTimeout(() => { locked = false; }, 300); // 300ms防连点
+                }
             };
             el.addEventListener('touchstart', trigger, {passive: false});
             el.addEventListener('mousedown', trigger);
