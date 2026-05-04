@@ -163,6 +163,7 @@
     let hasAnomalyToday = false, currentAnomalyId = null; 
     let isTransitioning = false, currentLookTarget = null, lastValidTarget = null; 
     let lastLookTargetAt = 0; 
+    const TARGET_MEMORY_MS = 1200; 
 
     const gameObjects = { stage1: {}, stage2: {} };
     // 鞋子不再是异常，它是身体部位！
@@ -1055,8 +1056,10 @@
             showReportButton(); 
         } else { 
             currentLookTarget = null; 
-            lastValidTarget = null; 
-            hideReportButton(); 
+            if ((performance.now() - lastLookTargetAt) > TARGET_MEMORY_MS) {
+                lastValidTarget = null; 
+                hideReportButton(); 
+            }
         }
     }
 
