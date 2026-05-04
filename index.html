@@ -167,6 +167,7 @@
 
 <script>
     let scene, camera, renderer, raycaster;
+    let stageLights = null;
     
     // --- 核心状态 ---
     let currentDay = 1, currentStage = 1; 
@@ -693,9 +694,25 @@
         const mainLight = new THREE.PointLight(0xfffae6, 0.9, 30, 2); mainLight.position.set(0, 8, 0); mainLight.castShadow = true; 
         mainLight.shadow.mapSize.width = 512; mainLight.shadow.mapSize.height = 512; mainLight.shadow.bias = -0.002; scene.add(mainLight);
         const hallAmbient = new THREE.AmbientLight(0xffffff, 0.1); hallAmbient.position.copy(STAGE_2_CENTER); scene.add(hallAmbient);
+        const hallLights = [];
         for(let z = -10; z >= -45; z -= 15) {
             const hl = new THREE.PointLight(0xccddff, 0.5, 15, 2); hl.position.set(STAGE_2_CENTER.x, 4, STAGE_2_CENTER.z + z); scene.add(hl);
+            hallLights.push(hl);
         }
+        const runnerKey = new THREE.PointLight(0xffffff, 0.25, 38, 1.8);
+        runnerKey.position.set(STAGE_3_CENTER.x, 5, -35);
+        scene.add(runnerKey);
+        stageLights = { ambient, mainLight, hallAmbient, hallLights, runnerKey };
+    }
+
+    function setStageLighting() {
+        if (!stageLights) return;
+        const isStage3 = currentStage === 3;
+        stageLights.ambient.intensity = isStage3 ? 0.42 : 0.2;
+        stageLights.mainLight.intensity = isStage3 ? 1.25 : 0.9;
+        stageLights.hallAmbient.intensity = isStage3 ? 0.2 : 0.1;
+        stageLights.hallLights.forEach(l => { l.intensity = isStage3 ? 0.85 : 0.5; });
+        stageLights.runnerKey.intensity = isStage3 ? 1.4 : 0.25;
     }
 
     // --- 游戏循环与核心逻辑 ---
@@ -722,7 +739,8 @@
         } else { currentAnomalyId = null; }
 
         document.getElementById('day-display').innerText = `第 ${currentDay} 天`;
-        document.getElementById('stage-desc').innerText = currentStage === 1 ? "LOC: CLASSROOM" : "LOC: HALLWAY";
+        document.getElementById('stage-desc').innerText = currentStage === 1 ? "LOC: CLASSROOM" : (currentStage === 2 ? "LOC: HALLWAY" : "LOC: RUNNER CORRIDOR");
+        setStageLighting();
         updateAnomalyPanel();
         
         resetPlayerPosition();
@@ -857,8 +875,10 @@
         isTransitioning = true;
         triggerScreenShake(900, 0.55);
         setTimeout(() => {
-            document.getElementById('fail-screen').classList.remove('hidden');
-        }, 920);
+            initRunnerMode();
+            resetPlayerPosition();
+            isTransitioning = false;
+        }, 940);
     }
 
     function initRunnerMode() {
@@ -883,6 +903,7 @@
             }
         }
         if (!monsterMesh) { monsterMesh = new THREE.Mesh(new THREE.BoxGeometry(1,2.2,1), new THREE.MeshStandardMaterial({color:0x550000})); scene.add(monsterMesh); }
+        setStageLighting();
     }
 
     window.startGame = function() { 
