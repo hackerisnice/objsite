@@ -804,8 +804,7 @@
 
     window.reportAnomaly = function() {
         if (isTransitioning) return;
-        const stillValidLastTarget = (performance.now() - lastLookTargetAt) <= TARGET_MEMORY_MS ? lastValidTarget : null;
-        const reportTarget = currentLookTarget || stillValidLastTarget;
+        const reportTarget = currentLookTarget;
         if (!reportTarget) {
             triggerTransition("操作无效", "请将准星对准异常物体后再报告", false);
             return; 
