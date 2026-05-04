@@ -101,15 +101,11 @@
         </div>
     </div>
 
-    <!-- 报告异常 -->
-    <div class="absolute top-[55%] left-1/2 transform -translate-x-1/2 -translate-y-1/2 interactive flex flex-col items-center">
-        <button id="report-btn" class="hidden px-8 py-3 bg-red-700/95 text-white font-bold rounded-xl border border-red-400 active:scale-95 flex items-center gap-3 backdrop-blur-md shadow-[0_0_30px_rgba(255,0,0,0.6)] transition-transform">
-            <span class="text-3xl pointer-none">⚠️</span> 
-            <div class="flex flex-col items-start pointer-none">
-                <span class="text-xl tracking-widest leading-none">报告异常</span>
-                <span id="target-name" class="text-[11px] text-yellow-300 mt-1 font-mono tracking-wide">目标: 未知</span>
-            </div>
-        </button>
+    <!-- 异常选择面板（替代报告按钮） -->
+    <div id="anomaly-panel" class="hidden absolute top-[55%] left-1/2 transform -translate-x-1/2 -translate-y-1/2 interactive z-40 bg-black/80 border border-red-500 rounded-xl p-4 backdrop-blur-md w-[320px]">
+        <p id="anomaly-panel-title" class="text-white font-bold text-sm mb-2">请选择异常事物</p>
+        <select id="anomaly-select" class="w-full bg-gray-900 text-white border border-gray-600 rounded px-3 py-2 text-sm mb-3"></select>
+        <button id="anomaly-submit-btn" class="w-full py-2 bg-red-700 text-white font-bold rounded-lg active:scale-95">确认上报</button>
     </div>
 
     <div id="joystick-base" class="hidden"><div id="joystick-stick"></div></div>
@@ -121,6 +117,16 @@
         <button id="normal-btn" class="px-10 py-4 bg-gray-900/90 border border-gray-500 text-white font-bold rounded-full text-lg hover:bg-gray-800 active:scale-95 backdrop-blur-lg shadow-[0_0_20px_rgba(0,0,0,0.8)] tracking-widest transition-transform">
             <span class="pointer-none">🚪 一切正常 (离开区域)</span>
         </button>
+    </div>
+
+
+    <div id="shoe-inventory" class="hidden absolute bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/70 border border-gray-600 rounded-xl px-4 py-3 interactive">
+        <div class="text-white text-xs mb-2">鞋子切换</div>
+        <div class="flex gap-2 mb-2">
+            <button id="equip-heels-btn" class="px-3 py-1 rounded bg-red-700 text-white text-xs">高跟鞋</button>
+            <button id="equip-sneaker-btn" class="px-3 py-1 rounded bg-gray-700 text-white text-xs">运动鞋</button>
+        </div>
+        <div class="w-44 h-2 bg-gray-800 rounded overflow-hidden"><div id="stamina-bar" class="h-full bg-green-500 w-full"></div></div>
     </div>
 
     <!-- 开始界面 -->
@@ -145,6 +151,12 @@
         <button onclick="location.reload()" class="px-12 py-4 bg-black text-white font-bold rounded-full text-xl shadow-2xl hover:scale-105 transition-transform">重返现实</button>
     </div>
 
+    <div id="fail-screen" class="hidden absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center p-8 text-center interactive z-50">
+        <h2 class="text-5xl font-black mb-4 text-red-200 tracking-tighter">被怪物抓住了</h2>
+        <p class="text-lg text-red-100 font-bold mb-8">它已经贴到你脸上，循环再次开始。</p>
+        <button onclick="location.reload()" class="px-10 py-3 bg-black text-white font-bold rounded-full text-lg shadow-2xl hover:scale-105 transition-transform">重新挑战</button>
+    </div>
+
     <div id="transition-screen" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center">
         <h2 id="transition-title" class="text-4xl md:text-6xl font-black text-white mb-4 drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]"></h2>
         <p id="transition-desc" class="text-red-500 text-base md:text-xl font-bold tracking-widest max-w-sm leading-relaxed whitespace-pre-wrap"></p>
@@ -155,10 +167,12 @@
 
 <script>
     let scene, camera, renderer, raycaster;
+    let stageLights = null;
     
     // --- 核心状态 ---
     let currentDay = 1, currentStage = 1; 
     const MAX_DAYS = 14;
+    const TRANSITION_UNLOCK_MS = 2800;
     let hasAnomalyToday = false, currentAnomalyId = null; 
     let isTransitioning = false, currentLookTarget = null, lastValidTarget = null; 
     let lastLookTargetAt = 0; 
@@ -175,6 +189,13 @@
 
     const STAGE_1_CENTER = new THREE.Vector3(0, 0, 0);
     const STAGE_2_CENTER = new THREE.Vector3(100, 0, 0);
+    const STAGE_3_CENTER = new THREE.Vector3(220, 0, 0);
+    let isRunnerMode = false, runnerDistance = 0;
+    let currentShoe = "heels", stamina = 100, isFallen = false, fallRecoverAt = 0;
+    let monsterMesh = null;
+    const runnerObstacles = [];
+    let fallAnimUntil = 0, faceFailAnimUntil = 0;
+    let screenShakeUntil = 0, shakeStrength = 0;
     
     // --- 运动与步伐物理 ---
     const moveState = { forward: 0, right: 0 }; 
@@ -292,6 +313,24 @@
     }
 
     // --- 📦 并发加载 真实提取几何体防偏移 ---
+
+    function loadObjWithFallback(loader, urls, onLoad, onProgress, onErrorFinal) {
+        let idx = 0;
+        const tryLoad = () => {
+            loader.load(
+                urls[idx],
+                onLoad,
+                onProgress,
+                () => {
+                    idx += 1;
+                    if (idx < urls.length) tryLoad();
+                    else if (onErrorFinal) onErrorFinal();
+                }
+            );
+        };
+        tryLoad();
+    }
+
     function loadCustomOBJs() {
         if (typeof THREE.OBJLoader === 'undefined') {
             document.getElementById('obj-status').innerHTML = '<span class="text-red-400">❌ 引擎库异常</span>';
@@ -300,7 +339,11 @@
         const objLoader = new THREE.OBJLoader();
 
         // --- 1. Earring.obj ---
-        const earringUrl = 'https://hackerisnice.github.io/objsite/Earring.obj';
+        const earringUrls = [
+            'https://hackerisnice.github.io/objsite/Earring.obj',
+            'https://hackerisnice.github.io/objsite/earring.obj',
+            'https://hackerisnice.github.io/objsite/Earring.OBJ'
+        ];
         const earringMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1.0, roughness: 0.1, emissive: 0x667788, emissiveIntensity: 0.5 });
         const fallbackGeo = new THREE.OctahedronGeometry(0.0035, 0); 
         const linkGeo = new THREE.CylinderGeometry(0.0005, 0.0005, 0.02, 4);
@@ -324,8 +367,8 @@
             earringsSystem.push(sys);
         }
 
-        objLoader.load(
-            earringUrl,
+        loadObjWithFallback(objLoader,
+            earringUrls,
             (object) => {
                 let extractedGeo = null;
                 object.traverse((child) => { 
@@ -354,11 +397,21 @@
                             tailGroup.add(finalMesh); 
                         });
                         objProgress.earringDone = true; updateObjUI();
+                    } else {
+                        objProgress.earringDone = true;
+                        updateObjUI();
                     }
+                } else {
+                    objProgress.earringDone = true;
+                    updateObjUI();
                 }
             },
             (xhr) => { if (xhr.lengthComputable) { objProgress.earring = (xhr.loaded / xhr.total) * 100; updateObjUI(); } },
-            () => { objProgress.earringDone = true; updateObjUI(); } 
+            () => {
+                objProgress.earringDone = false;
+                document.getElementById('obj-status').innerHTML = '<span class="text-red-400">⚠️ 耳坠模型加载失败，使用占位模型</span>';
+                updateObjUI();
+            }
         );
 
         // --- 2. Shoe.obj (作为玩家第一人称身体) ---
@@ -672,9 +725,25 @@
         const mainLight = new THREE.PointLight(0xfffae6, 0.9, 30, 2); mainLight.position.set(0, 8, 0); mainLight.castShadow = true; 
         mainLight.shadow.mapSize.width = 512; mainLight.shadow.mapSize.height = 512; mainLight.shadow.bias = -0.002; scene.add(mainLight);
         const hallAmbient = new THREE.AmbientLight(0xffffff, 0.1); hallAmbient.position.copy(STAGE_2_CENTER); scene.add(hallAmbient);
+        const hallLights = [];
         for(let z = -10; z >= -45; z -= 15) {
             const hl = new THREE.PointLight(0xccddff, 0.5, 15, 2); hl.position.set(STAGE_2_CENTER.x, 4, STAGE_2_CENTER.z + z); scene.add(hl);
+            hallLights.push(hl);
         }
+        const runnerKey = new THREE.PointLight(0xffffff, 0.25, 38, 1.8);
+        runnerKey.position.set(STAGE_3_CENTER.x, 5, -35);
+        scene.add(runnerKey);
+        stageLights = { ambient, mainLight, hallAmbient, hallLights, runnerKey };
+    }
+
+    function setStageLighting() {
+        if (!stageLights) return;
+        const isStage3 = currentStage === 3;
+        stageLights.ambient.intensity = isStage3 ? 0.42 : 0.2;
+        stageLights.mainLight.intensity = isStage3 ? 1.25 : 0.9;
+        stageLights.hallAmbient.intensity = isStage3 ? 0.2 : 0.1;
+        stageLights.hallLights.forEach(l => { l.intensity = isStage3 ? 0.85 : 0.5; });
+        stageLights.runnerKey.intensity = isStage3 ? 1.4 : 0.25;
     }
 
     // --- 游戏循环与核心逻辑 ---
@@ -701,7 +770,9 @@
         } else { currentAnomalyId = null; }
 
         document.getElementById('day-display').innerText = `第 ${currentDay} 天`;
-        document.getElementById('stage-desc').innerText = currentStage === 1 ? "LOC: CLASSROOM" : "LOC: HALLWAY";
+        document.getElementById('stage-desc').innerText = currentStage === 1 ? "LOC: CLASSROOM" : (currentStage === 2 ? "LOC: HALLWAY" : "LOC: RUNNER CORRIDOR");
+        setStageLighting();
+        updateAnomalyPanel();
         
         resetPlayerPosition();
     }
@@ -741,7 +812,15 @@
     function triggerTransition(title, subtitle, isGameOver = false) {
         if (isTransitioning) return;
         isTransitioning = true; 
-        hideReportButton();
+
+        const forceUnlockTimer = setTimeout(() => {
+            isTransitioning = false;
+            const screenEl = document.getElementById('transition-screen');
+            if (screenEl) {
+                screenEl.style.opacity = '0';
+                screenEl.classList.add('hidden');
+            }
+        }, TRANSITION_UNLOCK_MS);
         
         const screen = document.getElementById('transition-screen');
         document.getElementById('transition-title').innerText = title; 
@@ -762,6 +841,7 @@
                 screen.style.opacity = '0';
                 setTimeout(() => {
                     screen.classList.add('hidden');
+                    clearTimeout(forceUnlockTimer);
                     isTransitioning = false; // 强制解锁，防止死锁
                     lastValidTarget = null;
                     currentLookTarget = null;
@@ -771,8 +851,12 @@
     }
 
     function handleStageTransition() {
-        if (currentDay === 8 && currentStage === 1) { 
-            currentStage = 2; triggerTransition("第一层突破", "进入无尽走廊", false); return true; 
+        if (currentDay === 8 && currentStage === 1) {
+            currentStage = 2; triggerTransition("第一层突破", "进入无尽走廊", false); return true;
+        }
+        if (currentDay === 14 && currentStage === 2) {
+            currentStage = 3; isRunnerMode = true; initRunnerMode();
+            triggerTransition("第二层破解", "进入10km长廊障碍跑", false); return true;
         }
         return false;
     }
@@ -792,21 +876,66 @@
 
     window.reportAnomaly = function() {
         if (isTransitioning) return;
-        const reportTarget = currentLookTarget || lastValidTarget;
-        if (!reportTarget) {
-            triggerTransition("操作无效", "请将准星对准异常物体后再报告", false);
-            return; 
+        const selected = document.getElementById('anomaly-select').value;
+        if (!selected) {
+            triggerTransition("操作无效", "请先选择异常事物", false);
+            return;
         }
 
-        if (hasAnomalyToday && reportTarget === currentAnomalyId) {
+        if (hasAnomalyToday && selected === currentAnomalyId) {
             currentDay++;
             if(currentDay > MAX_DAYS) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning = true; }
             else if(!handleStageTransition()) { triggerTransition("异常清除", `进入第 ${currentDay} 天`, false); }
-        } else { 
-            let errStr = hasAnomalyToday ? `真正的异常是：${nameMap[currentAnomalyId]}\n你却指认了：${nameMap[reportTarget]}` : `这里明明一切正常\n你却指认了：${nameMap[reportTarget]}`;
-            triggerTransition("判断错误", `${errStr}\n时间重置回原点`, true); 
+        } else {
+            let errStr = hasAnomalyToday ? `真正的异常是：${nameMap[currentAnomalyId]}
+你却指认了：${nameMap[selected]}` : `这里明明一切正常
+你却指认了：${nameMap[selected]}`;
+            triggerTransition("判断错误", `${errStr}
+时间重置回原点`, true);
         }
     };
+
+    function triggerScreenShake(duration = 280, strength = 0.15) {
+        screenShakeUntil = performance.now() + duration;
+        shakeStrength = Math.max(shakeStrength, strength);
+    }
+
+    function triggerMonsterFaceFail() {
+        if (isTransitioning) return;
+        faceFailAnimUntil = performance.now() + 900;
+        isTransitioning = true;
+        triggerScreenShake(900, 0.55);
+        setTimeout(() => {
+            initRunnerMode();
+            resetPlayerPosition();
+            isTransitioning = false;
+        }, 940);
+    }
+
+    function initRunnerMode() {
+        document.getElementById('anomaly-panel').classList.add('hidden');
+        document.getElementById('normal-btn').classList.add('hidden');
+        document.getElementById('shoe-inventory').classList.remove('hidden');
+        runnerDistance = 0; stamina = 100; currentShoe = 'heels';
+        isFallen = false;
+        fallAnimUntil = 0;
+        faceFailAnimUntil = 0;
+        runnerObstacles.forEach(o => scene.remove(o)); runnerObstacles.length = 0;
+        for (let i=1; i<=120; i++) {
+            if (Math.random() < 0.22) {
+                const obs = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.25,0.8), new THREE.MeshStandardMaterial({color:0x3366ff}));
+                obs.position.set(STAGE_3_CENTER.x + (Math.random()-0.5)*3, 0.12, i * -8);
+                obs.userData = {type:'low_obstacle'}; scene.add(obs); runnerObstacles.push(obs);
+            }
+            if (Math.random() < 0.08) {
+                const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.45,0.2,0.7), new THREE.MeshStandardMaterial({color:0x00ff88}));
+                shoe.position.set(STAGE_3_CENTER.x + (Math.random()-0.5)*3, 0.12, i * -8 - 3);
+                shoe.userData = {type:'sneaker_pickup'}; scene.add(shoe); runnerObstacles.push(shoe);
+            }
+        }
+        if (!monsterMesh) { monsterMesh = new THREE.Mesh(new THREE.BoxGeometry(1,2.2,1), new THREE.MeshStandardMaterial({color:0x550000})); scene.add(monsterMesh); }
+        setStageLighting();
+    }
 
     window.startGame = function() { 
         initAudio(); 
@@ -815,8 +944,8 @@
     };
 
     function resetPlayerPosition() {
-        const center = currentStage === 1 ? STAGE_1_CENTER : STAGE_2_CENTER;
-        const zOffset = currentStage === 1 ? 6 : -2; 
+        const center = currentStage === 1 ? STAGE_1_CENTER : (currentStage === 2 ? STAGE_2_CENTER : STAGE_3_CENTER);
+        const zOffset = currentStage === 1 ? 6 : (currentStage === 2 ? -2 : 4); 
         
         camera.position.set(center.x, CAMERA_HEIGHT, center.z + zOffset); 
         targetRotationX = 0; targetRotationY = currentStage === 1 ? 0 : Math.PI; 
@@ -854,18 +983,29 @@
             let locked = false;
             const trigger = (e) => {
                 e.preventDefault(); e.stopPropagation(); 
-                if(locked) return; locked = true; fn();
-                setTimeout(() => { locked = false; }, 300); // 300ms防连点
+                if(locked) return;
+                locked = true;
+                try {
+                    fn();
+                } catch (err) {
+                    console.error('button handler failed:', err);
+                    showRuntimeError('按钮事件执行失败，请重试');
+                    isTransitioning = false;
+                } finally {
+                    setTimeout(() => { locked = false; }, 300); // 300ms防连点
+                }
             };
             el.addEventListener('touchstart', trigger, {passive: false});
             el.addEventListener('mousedown', trigger);
         };
         attachSafe('normal-btn', window.reportNormal);
-        attachSafe('report-btn', window.reportAnomaly);
         attachSafe('start-btn', window.startGame);
         attachSafe('jump-btn', window.playerJump);
         attachSafe('sprint-btn', window.toggleSprint);
         attachSafe('reset-btn', window.resetView);
+        attachSafe('anomaly-submit-btn', window.reportAnomaly);
+        attachSafe('equip-heels-btn', () => { if(isRunnerMode) currentShoe='heels'; });
+        attachSafe('equip-sneaker-btn', () => { if(isRunnerMode && stamina>0) currentShoe='sneaker'; });
 
         document.addEventListener('keydown', (e) => {
             if(isTransitioning) return;
@@ -950,6 +1090,17 @@
     function onWindowResize() { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
 
     function updateMovement() {
+        if (isRunnerMode) {
+            const now = performance.now();
+            if (isFallen) {
+                if (now >= fallRecoverAt) isFallen = false;
+                else {
+                    moveState.forward = 0;
+                    moveState.right = 0;
+                }
+            }
+            if (!isFallen) moveState.forward = 1;
+        }
         if (isTransitioning) return;
         camera.rotation.y += (targetRotationY - camera.rotation.y) * 0.3; camera.rotation.x += (targetRotationX - camera.rotation.x) * 0.3;
 
@@ -972,10 +1123,10 @@
             camera.position.addScaledVector(dir, moveState.forward * currentSpeed);
             camera.position.addScaledVector(rightDir, moveState.right * currentSpeed);
 
-            const cx = currentStage === 1 ? STAGE_1_CENTER.x : STAGE_2_CENTER.x;
-            const bx = currentStage === 1 ? 8.5 : 2.5;  
-            const bzMin = currentStage === 1 ? -8.5 : -49; 
-            const bzMax = currentStage === 1 ? 8.5 : -1;
+            const cx = currentStage === 1 ? STAGE_1_CENTER.x : (currentStage === 2 ? STAGE_2_CENTER.x : STAGE_3_CENTER.x);
+            const bx = currentStage === 1 ? 8.5 : (currentStage === 2 ? 2.5 : 2.8);  
+            const bzMin = currentStage === 1 ? -8.5 : (currentStage === 2 ? -49 : -10020); 
+            const bzMax = currentStage === 1 ? 8.5 : (currentStage === 2 ? -1 : 10);
 
             camera.position.x = Math.max(cx - bx, Math.min(cx + bx, camera.position.x));
             camera.position.z = Math.max(bzMin, Math.min(bzMax, camera.position.z));
@@ -993,6 +1144,61 @@
                 camera.position.y = CAMERA_HEIGHT + Math.sin(Date.now() * bobFreq) * bobAmp * (Math.abs(moveState.forward) + Math.abs(moveState.right));
             }
         } else if (isGrounded) { camera.position.y += (CAMERA_HEIGHT - camera.position.y) * 0.2; }
+
+        if (isRunnerMode) {
+            runnerDistance = Math.max(runnerDistance, Math.abs(camera.position.z));
+            if (currentShoe === 'sneaker') stamina = Math.max(0, stamina - 0.06);
+            else stamina = Math.min(100, stamina + 0.02);
+            if (currentShoe === 'sneaker' && stamina <= 0) currentShoe = 'heels';
+            const sbar = document.getElementById('stamina-bar'); if (sbar) sbar.style.width = `${stamina}%`;
+            runnerObstacles.forEach(o => {
+                if (!o.visible) return;
+                const d = o.position.distanceTo(camera.position);
+                if (d < 0.8 && o.userData.type === 'low_obstacle' && currentShoe === 'heels') {
+                    isFallen = true;
+                    fallRecoverAt = performance.now() + 1200;
+                    fallAnimUntil = performance.now() + 500;
+                    yVelocity = -0.05;
+                    triggerScreenShake(420, 0.28);
+                }
+                if (d < 0.9 && o.userData.type === 'sneaker_pickup') { o.visible = false; stamina = Math.min(100, stamina + 40); }
+            });
+            if (monsterMesh) {
+                monsterMesh.position.lerp(new THREE.Vector3(camera.position.x,1.1,camera.position.z+3.2),0.02);
+                if (monsterMesh.position.distanceTo(camera.position) < 2.2) { triggerMonsterFaceFail(); }
+            }
+            if (runnerDistance >= 10000) { document.getElementById('win-screen').classList.remove('hidden'); isTransitioning=true; }
+        }
+
+        const nowFx = performance.now();
+        const shakeActive = nowFx < screenShakeUntil;
+        if (shakeActive) {
+            const decay = (screenShakeUntil - nowFx) / 300;
+            const jitterX = (Math.random() - 0.5) * shakeStrength * decay;
+            const jitterY = (Math.random() - 0.5) * shakeStrength * decay;
+            camera.rotation.z = jitterX * 0.08;
+            camera.position.x += jitterX;
+            camera.position.y += jitterY * 0.4;
+        } else {
+            camera.rotation.z *= 0.75;
+            shakeStrength *= 0.8;
+        }
+
+        if (nowFx < fallAnimUntil) {
+            const t = 1 - ((fallAnimUntil - nowFx) / 500);
+            camera.rotation.x = Math.min(MAX_PITCH, camera.rotation.x + 0.04 * (1 - t));
+            camera.rotation.z -= 0.06 * (1 - t);
+        }
+
+        if (nowFx < faceFailAnimUntil && monsterMesh) {
+            const p = 1 - ((faceFailAnimUntil - nowFx) / 900);
+            monsterMesh.position.lerp(new THREE.Vector3(camera.position.x, 1.45, camera.position.z - 0.25), 0.25 + p * 0.35);
+            monsterMesh.scale.setScalar(1 + p * 1.2);
+            camera.fov = 75 + p * 25;
+            camera.updateProjectionMatrix();
+        } else if (monsterMesh) {
+            monsterMesh.scale.lerp(new THREE.Vector3(1,1,1), 0.2);
+        }
 
         // --- 身体高跟鞋步伐渲染 (防穿模且朝向正向) ---
         const footOffsetX = 0.15; 
@@ -1032,28 +1238,33 @@
             currentLookTarget = foundTarget; 
             lastValidTarget = foundTarget; 
             lastLookTargetAt = performance.now(); 
-            showReportButton(); 
         } else { 
             currentLookTarget = null; 
             lastValidTarget = null; 
-            hideReportButton(); 
         }
+        updateAnomalyPanel();
     }
 
-    function showReportButton() {
-        const btn = document.getElementById('report-btn');
-        const tgtName = document.getElementById('target-name');
-        if (btn.classList.contains('hidden')) {
-            btn.classList.remove('hidden'); document.getElementById('crosshair').classList.add('crosshair-active');
-        }
-        const newText = `目标: ${nameMap[lastValidTarget] || '未知'}`;
-        if (tgtName.innerText !== newText) tgtName.innerText = newText;
-    }
-    
-    function hideReportButton() {
-        const btn = document.getElementById('report-btn');
-        if (!btn.classList.contains('hidden')) {
-            btn.classList.add('hidden'); document.getElementById('crosshair').classList.remove('crosshair-active');
+    function updateAnomalyPanel() {
+        const panel = document.getElementById('anomaly-panel');
+        const title = document.getElementById('anomaly-panel-title');
+        const select = document.getElementById('anomaly-select');
+        if (!panel || !title || !select) return;
+
+        if (currentStage === 3) { panel.classList.add('hidden'); return; }
+        const entryTarget = currentStage === 1 ? 'blackboard' : 'hall_door';
+        const stageName = currentStage === 1 ? '黑板' : '大门旁公告栏';
+        const stageOptions = currentStage === 1 ? interactableIds_1 : interactableIds_2;
+
+        if (currentLookTarget === entryTarget) {
+            panel.classList.remove('hidden');
+            title.innerText = `在${stageName}选择异常事物`;
+            const prev = select.value;
+            select.innerHTML = `<option value="">-- 请选择 --</option>` + stageOptions.map(id => `<option value="${id}">${nameMap[id]}</option>`).join('');
+            if (stageOptions.includes(prev)) select.value = prev;
+        } else {
+            panel.classList.add('hidden');
+            select.value = '';
         }
     }
 
